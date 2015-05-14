@@ -16,7 +16,7 @@ else(LFL_ANDROID)
 endif(LFL_ANDROID)
 
 lfl_project(chess)
-add_subdirectory(../lfapp ${CMAKE_CURRENT_BINARY_DIR}/lfapp_obj)
+add_subdirectory(../core/lfapp ${CMAKE_CURRENT_BINARY_DIR}/lfapp_obj)
 add_definitions(${LFAPP_DEF})
 include_directories(${LFAPP_INCLUDE})
 
@@ -25,7 +25,7 @@ if(LFL_ANDROID)
 else(LFL_ANDROID)
     add_executable(chess chess.cpp ${SDL_MAIN})
     target_link_libraries(chess ${LFAPP_LIB})
-    lfapp_post_build_start(chess LChess)
+    lfapp_post_build_start(chess chess LChess)
 endif(LFL_ANDROID)
 
 include_directories(${GTEST_INCLUDE})
