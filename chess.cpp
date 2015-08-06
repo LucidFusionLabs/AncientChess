@@ -82,8 +82,8 @@ extern "C" int main(int argc, const char *argv[]) {
 
     BindMap *binds = screen->binds = new BindMap();
 //  binds->Add(Bind(key,            callback));
-    binds->Add(Bind(Key::Backquote, Bind::CB(bind([&](){ screen->console->Toggle(); }))));
-    binds->Add(Bind(Key::Quote,     Bind::CB(bind([&](){ screen->console->Toggle(); }))));
+    binds->Add(Bind(Key::Backquote, Bind::CB(bind(&Shell::console,         &app->shell, vector<string>()))));
+    binds->Add(Bind(Key::Quote,     Bind::CB(bind(&Shell::console,         &app->shell, vector<string>()))));
     binds->Add(Bind(Key::Escape,    Bind::CB(bind(&Shell::quit,            &app->shell, vector<string>()))));
 
     // start our engine
