@@ -37,16 +37,33 @@ bool console_animating = 0;
 struct ChessTerminal : public Terminal {
   bool logged_in = false;
   unsigned char newline = '\n';
-  string erasechar = "\xff\xf7";
+  UnbackedTextGUI local_cmd;
   AhoCorasickFSM<char> login_fsm, move_fsm;
   StringMatcher<char> login_matcher, move_matcher;
   ChessTerminal(ByteSink *O, Window *W, Font *F) :
-    Terminal(O, W, F), login_fsm({"\rfics%"}), move_fsm({"\r<12> "}), login_matcher(&login_fsm), move_matcher(&move_fsm) {
+    Terminal(O, W, F), local_cmd(Fonts::Default()),
+    login_fsm({"\rfics%"}), move_fsm({"\r<12> "}), login_matcher(&login_fsm), move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
   }
 
-  virtual void Enter() override { sink->WriteChar(newline); }
-  virtual void Erase() override { sink->Write(erasechar.data(), erasechar.size()); }
+  virtual void Input(char k) { local_cmd.Input(k); Terminal::Write(StringPiece(&k, 1)); }
+  virtual void Erase      () { local_cmd.Erase();  Terminal::Write(StringPiece("\x08\x1b[1P")); }
+  virtual void Enter      () {
+    sink->Write(StrCat(String::ToUTF8(local_cmd.cmd_line.Text16()), newline));
+    Terminal::Write(StringPiece("\r\n", 1));
+    local_cmd.AssignInput("");
+  }
+  virtual void Tab        () {}
+  virtual void Escape     () {}
+  virtual void HistUp     () {}
+  virtual void HistDown   () {}
+  virtual void CursorRight() {}
+  virtual void CursorLeft () {}
+  virtual void PageUp     () {}
+  virtual void PageDown   () {}
+  virtual void Home       () {}
+  virtual void End        () {}
+
   virtual void Write(const StringPiece &b, bool update_fb=true, bool release_fb=true) {
     string s = b.str();
     if (!logged_in) login_matcher.Match(s);
@@ -60,7 +77,6 @@ struct ChessTerminalWindow : public TerminalWindowT<ChessTerminal> {
   ChessTerminalWindow(const string &hostport) :
     TerminalWindowT(new NetworkTerminalController(Singleton<HTTPClient>::Get(), hostport)) {
     controller->frame_on_keyboard_input = true;
-    controller->local_echo = true;
   }
 };
 
@@ -87,9 +103,8 @@ struct ChessGUI : public GUI {
 
   void LoginCB(const string&) {
     unsigned char nl = chess_terminal->terminal->newline;
-    string setup_command = StrCat(nl, "set style 12", nl);
     chess_terminal->terminal->logged_in = true;
-    chess_terminal->controller->Write(setup_command.data(), setup_command.size());
+    chess_terminal->controller->Write(StrCat(nl, "set style 12", nl));
   }
 
   void GameUpdateCB(const string &s) {
