@@ -30,19 +30,19 @@ DEFINE_string(connect, "freechess.org:5000", "Connect to server");
 AssetMap asset;
 SoundAssetMap soundasset;
 Chess::Position position;
-Time move_time;
-int move_square_from = -1, move_square_to = -1;
 bool console_animating = 0;
 
 struct ChessTerminal : public Terminal {
-  bool logged_in = false;
+  string prompt = "fics%", filter_prompt = StrCat("\n\r", prompt, " ");
   unsigned char newline = '\n';
+  bool logged_in = false;
   UnbackedTextGUI local_cmd;
   AhoCorasickFSM<char> login_fsm, move_fsm;
   StringMatcher<char> login_matcher, move_matcher;
+
   ChessTerminal(ByteSink *O, Window *W, Font *F) :
     Terminal(O, W, F), local_cmd(Fonts::Default()),
-    login_fsm({"\rfics%"}), move_fsm({"\r<12> "}), login_matcher(&login_fsm), move_matcher(&move_fsm) {
+    login_fsm({StrCat("\r", prompt)}), move_fsm({"\r<12> "}), login_matcher(&login_fsm), move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
   }
 
@@ -50,7 +50,7 @@ struct ChessTerminal : public Terminal {
   virtual void Erase      () { local_cmd.Erase();  Terminal::Write(StringPiece("\x08\x1b[1P")); }
   virtual void Enter      () {
     sink->Write(StrCat(String::ToUTF8(local_cmd.cmd_line.Text16()), newline));
-    Terminal::Write(StringPiece("\r\n", 1));
+    Terminal::Write(StringPiece("\r\n", 2));
     local_cmd.AssignInput("");
   }
   virtual void Tab        () {}
@@ -67,9 +67,11 @@ struct ChessTerminal : public Terminal {
   virtual void Write(const StringPiece &b, bool update_fb=true, bool release_fb=true) {
     string s = b.str();
     if (!logged_in) login_matcher.Match(s);
-    string filtered;
-    move_matcher.Match(s, &filtered);
-    Terminal::Write(filtered, update_fb, release_fb);
+    string move_filtered;
+    move_matcher.Match(s, &move_filtered);
+    int suppressed_prompt = SuffixMatch(move_filtered, filter_prompt) ? filter_prompt.size() : 0;
+    Terminal::Write(StringPiece(move_filtered.data(), move_filtered.size()-suppressed_prompt), update_fb, release_fb);
+    if (suppressed_prompt && !PrefixMatch(String::ToUTF8(line.Back()->Text16()), prompt)) Terminal::Write(filter_prompt);
   }
 };
 
@@ -81,12 +83,18 @@ struct ChessTerminalWindow : public TerminalWindowT<ChessTerminal> {
 };
 
 struct ChessGUI : public GUI {
-  point term_dim;
-  Box win, term;
+  point term_dim, square_dim;
+  Box win, board, term;
+  DragTracker drag_tracker;
+  pair<bool, int> dragging_piece;
   ChessTerminalWindow *chess_terminal=0;
+  int move_square_from = -1, move_square_to = -1;
+  bool move_capture = 0;
+  Time move_time;
   ChessGUI() : GUI(screen), term_dim(0, 10), term(0, 0, 0, term_dim.y * Video::InitFontHeight()) {}
 
   void Open(const string &hostport) {
+    Activate();
     Layout();
     CheckNullAssign(&chess_terminal, new ChessTerminalWindow(hostport));
     chess_terminal->Open(term_dim.x, term_dim.y, FLAGS_default_font_size);
@@ -96,9 +104,12 @@ struct ChessGUI : public GUI {
   }
 
   Box SquareCoords(int p) const {
-    static const int border = 5;
-    int w = screen->width-2*border, h = screen->height-2*border - term.h;
-    return Box(border+Chess::SquareX(p)/8.0*w, border+Chess::SquareY(p)/8.0*h + term.h, 1/8.0*w, 1/8.0*h);
+    return Box(board.x + Chess::SquareX(p) * square_dim.x,
+               board.y + Chess::SquareY(p) * square_dim.y, square_dim.x, square_dim.y);
+  }
+
+  int SquareFromCoords(const point &p) const {
+    return Chess::SquareFromXY(p.x / square_dim.x, p.y / square_dim.y); 
   }
 
   void LoginCB(const string&) {
@@ -125,7 +136,32 @@ struct ChessGUI : public GUI {
     } else if (move.size() < 7 || move[1] != '/' || move[4] != '-' ||
                (move_square_from = Chess::SquareID(&move[2])) == -1 ||
                (move_square_to   = Chess::SquareID(&move[5])) == -1) return ERROR("Unknown move ", move);
+    move_capture = args[20].find("x") != string::npos;
     move_time = Now();
+
+    if (FLAGS_lfapp_audio) {
+      static SoundAsset *move_sound = soundasset("move"), *capture_sound = soundasset("capture");
+      SystemAudio::PlaySoundEffect(move_capture ? capture_sound : move_sound);
+    }
+
+    int p1_secs = atoi(args[15]), p2_secs = atoi(args[16]);
+    screen->SetCaption(StringPrintf("%s %d:%02d vs %s %d:%02d",
+                                    args[8].c_str(), p1_secs/60, p1_secs%60,
+                                    args[9].c_str(), p2_secs/60, p2_secs%60));
+  }
+
+  void DragCB(int button, int x, int y, int down) {
+    int square;
+    point p = point(x, y) - board.Position();
+    if ((square = SquareFromCoords(p)) < 0) return;
+    bool start = drag_tracker.Update(p, down);
+    if (start) dragging_piece = position.ClearSquare(square);
+    if (!dragging_piece.second || down) return;
+    position.SetSquare(square, dragging_piece);
+    int start_square = SquareFromCoords(drag_tracker.beg_click);
+    string move = StrCat(Chess::PieceChar(dragging_piece.second),
+                         Chess::SquareName(start_square), Chess::SquareName(square));
+    chess_terminal->controller->Write(StrCat(move, chess_terminal->terminal->newline));
   }
 
   void Layout() {
@@ -133,6 +169,10 @@ struct ChessGUI : public GUI {
     term.w = win.w;
     term_dim.x = win.w / Video::InitFontWidth();
     MinusPlus(&win.h, &win.y, term.h);
+    board = Box::DelBorder(win, Border(5,5,5,5));
+    square_dim = point(board.w/8, board.h/8);
+    AddDragBox(board, MouseController::CoordCB(bind(&ChessGUI::DragCB, this, _1, _2, _3, _4)));
+
     Texture *board_tex = &asset("board")->tex;
     child_box.PushBack(win, Drawable::Attr(board_tex), board_tex);
   }
@@ -145,14 +185,20 @@ struct ChessGUI : public GUI {
     int black_font_index[7] = { 0, 3, 2, 0, 5, 4, 1 }, bits[65];
     static Font *pieces = Fonts::Get("ChessPieces1");
     for (int i=Chess::PAWN; i <= Chess::KING; i++) {
-      Bit::Indices(position.white[i], bits); for (int *b = bits; *b != -1; b++) { Box w=SquareCoords(*b); pieces->DrawGlyph(black_font_index[i]+6, w); }
-      Bit::Indices(position.black[i], bits); for (int *b = bits; *b != -1; b++) { Box w=SquareCoords(*b); pieces->DrawGlyph(black_font_index[i],   w); }
+      Bit::Indices(position.white[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(black_font_index[i]+6, SquareCoords(*b));
+      Bit::Indices(position.black[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(black_font_index[i],   SquareCoords(*b));
     }
 
     if (move_square_from != -1 && move_square_to != -1) {
       screen->gd->SetColor(Color(85, 85,  255)); BoxOutline(1).Draw(SquareCoords(move_square_from));
       screen->gd->SetColor(Color(85, 255, 255)); BoxOutline(1).Draw(SquareCoords(move_square_to));
       screen->gd->SetColor(Color::white);
+    }
+
+    if (drag_tracker.changing && dragging_piece.second) {
+      int glyph_index = black_font_index[dragging_piece.second] + 6*(!dragging_piece.first);
+      int start_square = SquareFromCoords(drag_tracker.beg_click);
+      pieces->DrawGlyph(glyph_index, SquareCoords(start_square) + (drag_tracker.end_click - drag_tracker.beg_click));
     }
 
     W->gd->DisableBlend();
@@ -170,8 +216,10 @@ void OnConsoleAnimating() { console_animating = screen->lfapp_console->animating
 using namespace LFL;
 
 extern "C" void LFAppCreateCB() {
+#ifdef LFL_DEBUG
   app->logfilename = StrCat(LFAppDownloadDir(), "chess.txt");
-  FLAGS_lfapp_video = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_lfapp_console = 1;
+#endif
+  FLAGS_lfapp_video = FLAGS_lfapp_audio = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_lfapp_console = 1;
   FLAGS_default_font_flag = FLAGS_lfapp_console_font_flag = 0;
   FLAGS_lfapp_console_font = "Nobile.ttf";
   screen->caption = "Chess";
@@ -194,8 +242,9 @@ extern "C" int main(int argc, const char *argv[]) {
   asset.Load();
   app->shell.assets = &asset;
 
-  // soundasset.Add(SoundAsset(name, filename,   ringbuf, channels, sample_rate, seconds ));
-  soundasset.Add(SoundAsset("draw",  "Draw.wav", 0,       0,        0,           0       ));
+  // soundasset.Add(SoundAsset(name,   filename,      ringbuf, channels, sample_rate, seconds ));
+  soundasset.Add(SoundAsset("move",    "move.wav",    0,       0,        0,           0       ));
+  soundasset.Add(SoundAsset("capture", "capture.wav", 0,       0,        0,           0       ));
   soundasset.Load();
   app->shell.soundassets = &soundasset;
 

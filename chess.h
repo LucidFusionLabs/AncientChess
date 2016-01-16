@@ -48,13 +48,19 @@ static const char initial_byte_board[] =
 "PPPPPPPP\n"
 "RNBQKBNR\n";
 
-//                                      { 0, pawns,        knights,    bishops,    rooks,      queen,      king      };
+//                                      { 0, pawns,         knights,     bishops,     rooks,       queen,       king       };
 static const BitBoard white_initial[] = { 0, 0xff00ULL,     0x42ULL,     0x24ULL,     0x81ULL,     0x10ULL,     0x8ULL     };
 static const BitBoard black_initial[] = { 0, 0xff00ULL<<40, 0x42ULL<<56, 0x24ULL<<56, 0x81ULL<<56, 0x10ULL<<56, 0x8ULL<<56 };
 
 static const char *ColorName(int n) {
   static const char *name[] = { "white", "black" };
   CHECK_RANGE(n, 0, 2);
+  return name[n];
+}
+
+static const char PieceChar(int n) {
+  static const char name[] = { 0, 'p', 'n', 'b', 'r', 'q', 'k' };
+  CHECK_RANGE(n, 0, 7);
   return name[n];
 }
 
@@ -71,14 +77,16 @@ static const char ByteBoardPieceSymbol(int n, bool color) {
   return color ? black_piece_value[n] : white_piece_value[n];
 }
 
-static int SquareID(const char *p) {
-  if (p[0] < 'a' || p[0] > 'h' || p[1] < '1' || p[1] > '8') return -1;
-  return 8 * (p[1] - '1') + 7 - (p[0] - 'a');
+static int SquareX(int s) { return 7 - (s % 8); }
+static int SquareY(int s) { return s / 8; }
+static int SquareFromXY(int x, int y) { return (x<0 || y<0 || x>7 || y>7) ? -1 : (y*8 + (7-x)); }
+
+static int SquareID(const char *s) {
+  if (s[0] < 'a' || s[0] > 'h' || s[1] < '1' || s[1] > '8') return -1;
+  return 8 * (s[1] - '1') + 7 - (s[0] - 'a');
 }
 
-static int         SquareX   (int p) { return 7 - (p % 8); }
-static int         SquareY   (int p) { return p / 8; }
-static const char *SquareName(int p) {
+static const char *SquareName(int s) {
   static const char *name[] = {
     "h1", "g1", "f1", "e1", "d1", "c1", "b1", "a1",
     "h2", "g2", "f2", "e2", "d2", "c2", "b2", "a2",
@@ -89,8 +97,8 @@ static const char *SquareName(int p) {
     "h7", "g7", "f7", "e7", "d7", "c7", "b7", "a7",
     "h8", "g8", "f8", "e8", "d8", "c8", "b8", "a8"
   };
-  CHECK_RANGE(p, 0, 64);
-  return name[p];
+  CHECK_RANGE(s, 0, 64);
+  return name[s];
 };
 
 string BitBoardToString(BitBoard b) {
@@ -147,10 +155,24 @@ struct Position {
 
   BitBoard AllPieces() const { return white[ALL] | black[ALL]; }
 
-  BitBoard *Pieces(bool color)       { return color ? black       : white;       }
-  BitBoard *Moves (bool color)       { return color ? black_moves : white_moves; }
+  /**/  BitBoard *Pieces(bool color)       { return color ? black       : white;       }
+  /**/  BitBoard *Moves (bool color)       { return color ? black_moves : white_moves; }
   const BitBoard *Pieces(bool color) const { return color ? black       : white;       }
   const BitBoard *Moves (bool color) const { return color ? black_moves : white_moves; }
+
+  void SetSquare(int s, const pair<bool,int> &p) {
+    BitBoard mask = (static_cast<BitBoard>(1) << s);
+    CHECK_RANGE(p.second, 1, 7);
+    if (p.first) { black[p.second] |= mask; black[0] |= mask; }
+    else         { white[p.second] |= mask; white[0] |= mask; }
+  }
+
+  pair<bool,int> ClearSquare(int s) {
+    BitBoard mask = (static_cast<BitBoard>(1) << s);
+    for (int i=1; i<7; i++) if (white[i] & mask) { white[0] &= ~mask; white[i] &= ~mask; return make_pair(0, i); }
+    for (int i=1; i<7; i++) if (black[i] & mask) { black[0] &= ~mask; black[i] &= ~mask; return make_pair(1, i); }
+    return make_pair(false, 0);
+  }
 };
 
 }; // namespace Chess
