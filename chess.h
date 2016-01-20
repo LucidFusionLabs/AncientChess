@@ -127,9 +127,9 @@ BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
 }
 
 struct Position {
-  bool move_color;
+  bool move_color=WHITE;
   BitBoard white[7], black[7], white_moves[7], black_moves[7];
-  Position(const char *b, bool to_move_color=WHITE) { LoadByteBoard(b, to_move_color); }
+  Position(const char *b) { LoadByteBoard(b); }
   Position() { Reset(); }
 
   void Reset() {
@@ -140,8 +140,7 @@ struct Position {
     SetAll(BLACK);
   }
 
-  void LoadByteBoard(const string &b, bool to_move_color=WHITE) {
-    move_color = to_move_color;
+  void LoadByteBoard(const string &b) {
     for (int i=PAWN; i<=KING; i++) white[i] = ByteBoardToBitBoard(b, ByteBoardPieceSymbol(i, WHITE));
     for (int i=PAWN; i<=KING; i++) black[i] = ByteBoardToBitBoard(b, ByteBoardPieceSymbol(i, BLACK));
     SetAll(WHITE);
