@@ -164,7 +164,7 @@ struct ChessGUI : public GUI {
 
     if (FLAGS_lfapp_audio) {
       static SoundAsset *move_sound = soundasset("move"), *capture_sound = soundasset("capture");
-      SystemAudio::PlaySoundEffect(move_capture ? capture_sound : move_sound);
+      app->PlaySoundEffect(move_capture ? capture_sound : move_sound);
     }
   }
 
