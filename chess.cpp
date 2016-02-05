@@ -35,15 +35,13 @@ bool console_animating = 0;
 
 struct ChessTerminal : public Terminal {
   string prompt = "fics%", filter_prompt = StrCat("\n\r", prompt, " ");
-  bool logged_in = false;
   UnbackedTextGUI local_cmd;
-  AhoCorasickFSM<char> login_fsm, move_fsm;
-  StringMatcher<char> login_matcher, move_matcher;
+  NextRecordDispatcher line_buf;
+  AhoCorasickFSM<char> move_fsm;
+  StringMatcher<char> move_matcher;
 
   ChessTerminal(ByteSink *O, Window *W, Font *F) :
-    Terminal(O, W, F), local_cmd(Fonts::Default()),
-    login_fsm({"\r**** Starting FICS session as "}), move_fsm({"\r<12> "}),
-    login_matcher(&login_fsm), move_matcher(&move_fsm) {
+    Terminal(O, W, F), local_cmd(Fonts::Default()), move_fsm({"\r<12> "}), move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
   }
 
@@ -66,9 +64,8 @@ struct ChessTerminal : public Terminal {
   virtual void End        () {}
 
   virtual void Write(const StringPiece &b, bool update_fb=true, bool release_fb=true) {
-    string s = b.str();
-    if (!logged_in) login_matcher.Match(s);
-    string move_filtered;
+    if (line_buf.cb) line_buf.AddData(b);
+    string s = b.str(), move_filtered;
     move_matcher.Match(s, &move_filtered);
     int suppressed_prompt = SuffixMatch(move_filtered, filter_prompt) ? filter_prompt.size() : 0;
     Terminal::Write(StringPiece(move_filtered.data(), move_filtered.size()-suppressed_prompt), update_fb, release_fb);
@@ -89,10 +86,10 @@ struct ChessGUI : public GUI {
   DragTracker drag_tracker;
   pair<bool, int> dragging_piece;
   ChessTerminalWindow *chess_terminal=0;
-  int move_square_from = -1, move_square_to = -1;
+  int move_square_from = -1, move_square_to = -1, game_number = 0, p1_secs = 0, p2_secs = 0;
   bool move_capture = 0, flip_board = 0;
-  Time move_time;
-  string my_name;
+  string my_name, p1_name, p2_name;
+  Time update_time;
   ChessGUI() : GUI(screen), term_dim(0, 10), term(0, 0, 0, term_dim.y * Video::InitFontHeight()) {}
 
   void Open(const string &hostport) {
@@ -101,8 +98,8 @@ struct ChessGUI : public GUI {
     CheckNullAssign(&chess_terminal, new ChessTerminalWindow(hostport));
     chess_terminal->Open(term_dim.x, term_dim.y, FLAGS_default_font_size);
     chess_terminal->terminal->SetColors(Singleton<TextGUI::StandardVGAColors>::Get());
-    chess_terminal->terminal->login_matcher.match_cb = bind(&ChessGUI::LoginCB, this, _1);
     chess_terminal->terminal->move_matcher.match_cb = bind(&ChessGUI::GameUpdateCB, this, _1);
+    chess_terminal->terminal->line_buf.cb = bind(&ChessGUI::LineCB, this, _1);
   }
 
   Box SquareCoords(int p) const {
@@ -118,15 +115,38 @@ struct ChessGUI : public GUI {
 
   void LoginCB(const string &s) {
     my_name = s.substr(0, s.find("("));
-    chess_terminal->terminal->logged_in = true;
     chess_terminal->controller->Write("\nset style 12\n");
     screen->SetCaption(StrCat(my_name, " @ ", FLAGS_connect));
+  }
+
+  void LineCB(const string &l) {
+    static string login_prefix = "\r**** Starting FICS session as ", game_prefix = "\r{Game ";
+    if (PrefixMatch(l, login_prefix)) LoginCB(StringWordIter(l.substr(login_prefix.size())).NextString());
+    else if (PrefixMatch(l, game_prefix)) {
+      StringWordIter words(l.substr(game_prefix.size()));
+      int game_no = atoi(words.NextString());
+      string p1 = words.NextString(), res = words.NextString(), p2 = words.NextString();
+      bool first_trailing = true;
+      while(words.next_offset >= 0) {
+        res = words.NextString();
+        if (first_trailing && !(first_trailing = false) && res == "Creating") return GameStartCB();
+      }
+      GameOverCB(game_no, p1.substr(1), p2.substr(0, p2.size() ? p2.size()-1 : 0), res);
+    }
+  }
+
+  void GameStartCB() {
+    if (FLAGS_lfapp_audio) {
+      static SoundAsset *start_sound = soundasset("start");
+      app->PlaySoundEffect(start_sound);
+    }
   }
 
   void GameUpdateCB(const string &s) {
     if (s.size() < 8*9) return;
     if (FLAGS_print_board_updates) INFO("GameUpdateCB: ", s.substr(8*9));
 
+    update_time = Now();
     position.LoadByteBoard(s);
     move_square_from = move_square_to = -1;
 
@@ -135,12 +155,11 @@ struct ChessGUI : public GUI {
     if (args.size() < 23) return;
 
     position.move_color = args.size() && args[0] == "B";
-
-    const string &p1_name = args[8], &p2_name = args[9];
-    int p1_secs = atoi(args[15]), p2_secs = atoi(args[16]);
-    screen->SetCaption(StringPrintf("%s %d:%02d vs %s %d:%02d",
-                                    p1_name.c_str(), p1_secs/60, p1_secs%60,
-                                    p2_name.c_str(), p2_secs/60, p2_secs%60));
+    game_number = atoi(args[7]);
+    p1_name = args[8];
+    p2_name = args[9];
+    p1_secs = atoi(args[15]);
+    p2_secs = atoi(args[16]);
 
     int move_number = atoi(args[17]);
     if (move_number == 1) {
@@ -160,11 +179,19 @@ struct ChessGUI : public GUI {
                (move_square_from = Chess::SquareID(&move[2])) == -1 ||
                (move_square_to   = Chess::SquareID(&move[5])) == -1) return ERROR("Unknown move ", move);
     move_capture = args[20].find("x") != string::npos;
-    move_time = Now();
 
     if (FLAGS_lfapp_audio) {
       static SoundAsset *move_sound = soundasset("move"), *capture_sound = soundasset("capture");
       app->PlaySoundEffect(move_capture ? capture_sound : move_sound);
+    }
+  }
+  
+  void GameOverCB(int game_no, const string &p1, const string &p2, const string &result) {
+    game_number = 0;
+    bool lose = (my_name == p1 && result == "0-1") || (my_name == p2 && result == "1-0");
+    if (FLAGS_lfapp_audio) {
+      static SoundAsset *win_sound = soundasset("win"), *lose_sound = soundasset("lose");
+      app->PlaySoundEffect(lose ? lose_sound : win_sound);
     }
   }
 
@@ -197,6 +224,14 @@ struct ChessGUI : public GUI {
 
   int Frame(LFL::Window *W, unsigned clicks, int flag) {
     Time now = Now();
+    if (game_number) {
+      int secs = ToSeconds(now - update_time).count();
+      int p1_s = p1_secs - (position.move_color ? 0 : secs), p2_s = p2_secs - (position.move_color ? secs : 0);
+      screen->SetCaption(StringPrintf("%s %d:%02d vs %s %d:%02d",
+                                      p1_name.c_str(), p1_s/60, p1_s%60,
+                                      p2_name.c_str(), p2_s/60, p2_s%60));
+    }
+
     chess_terminal->ReadAndUpdateTerminalFramebuffer();
     Draw();
 
@@ -246,6 +281,8 @@ extern "C" void LFAppCreateCB() {
   FLAGS_lfapp_video = FLAGS_lfapp_audio = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_lfapp_console = 1;
   FLAGS_default_font_flag = FLAGS_lfapp_console_font_flag = 0;
   FLAGS_lfapp_console_font = "Nobile.ttf";
+  FLAGS_peak_fps = 20;
+  FLAGS_target_fps = 0;
   screen->caption = "Chess";
   screen->width = 630;
   chess_gui = new ChessGUI();
@@ -268,8 +305,11 @@ extern "C" int main(int argc, const char *argv[]) {
   app->shell.assets = &asset;
 
   // soundasset.Add(SoundAsset(name,   filename,      ringbuf, channels, sample_rate, seconds ));
+  soundasset.Add(SoundAsset("start",   "start.wav",   0,       0,        0,           0       ));
   soundasset.Add(SoundAsset("move",    "move.wav",    0,       0,        0,           0       ));
   soundasset.Add(SoundAsset("capture", "capture.wav", 0,       0,        0,           0       ));
+  soundasset.Add(SoundAsset("win",     "win.wav",     0,       0,        0,           0       ));
+  soundasset.Add(SoundAsset("lose",    "lose.wav",    0,       0,        0,           0       ));
   soundasset.Load();
   app->shell.soundassets = &soundasset;
 
