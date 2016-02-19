@@ -28,20 +28,22 @@ namespace LFL {
 DEFINE_string(connect, "freechess.org:5000", "Connect to server");
 DEFINE_bool(print_board_updates, false, "Print board updatees");
 
-AssetMap asset;
-SoundAssetMap soundasset;
-Chess::Position position;
-bool console_animating = 0;
+const point initial_term_dim(0, 10);
+struct MyAppState {
+  AssetMap asset;
+  SoundAssetMap soundasset;
+} *my_app = new MyAppState();
 
 struct ChessTerminal : public Terminal {
   string prompt = "fics%", filter_prompt = StrCat("\n\r", prompt, " ");
-  UnbackedTextGUI local_cmd;
+  UnbackedTextBox local_cmd;
   NextRecordDispatcher line_buf;
   AhoCorasickFSM<char> move_fsm;
   StringMatcher<char> move_matcher;
 
-  ChessTerminal(ByteSink *O, Window *W, Font *F) :
-    Terminal(O, W, F), local_cmd(Fonts::Default()), move_fsm({"\r<12> "}), move_matcher(&move_fsm) {
+  ChessTerminal(ByteSink *O, const FontDesc &F) :
+    Terminal(O, screen->gd, F), local_cmd(app->fonts->DefaultDesc()), move_fsm({"\r<12> "}),
+    move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
   }
 
@@ -75,32 +77,23 @@ struct ChessTerminal : public Terminal {
 
 struct ChessTerminalWindow : public TerminalWindowT<ChessTerminal> {
   ChessTerminalWindow(const string &hostport) :
-    TerminalWindowT(new NetworkTerminalController(Singleton<HTTPClient>::Get(), hostport)) {
+    TerminalWindowT(new NetworkTerminalController(app->net->http_client.get(), hostport)) {
     controller->frame_on_keyboard_input = true;
   }
 };
 
 struct ChessGUI : public GUI {
-  point term_dim, square_dim;
+  point term_dim=initial_term_dim, square_dim;
   Box win, board, term;
+  Time update_time;
+  Chess::Position position;
+  string my_name, p1_name, p2_name;
+  bool move_capture = 0, flip_board = 0, console_animating = 0 ;
+  int move_square_from = -1, move_square_to = -1, game_number = 0, p1_secs = 0, p2_secs = 0;
+  unique_ptr<ChessTerminalWindow> chess_terminal;
   DragTracker drag_tracker;
   pair<bool, int> dragging_piece;
-  ChessTerminalWindow *chess_terminal=0;
-  int move_square_from = -1, move_square_to = -1, game_number = 0, p1_secs = 0, p2_secs = 0;
-  bool move_capture = 0, flip_board = 0;
-  string my_name, p1_name, p2_name;
-  Time update_time;
-  ChessGUI() : GUI(screen), term_dim(0, 10), term(0, 0, 0, term_dim.y * Video::InitFontHeight()) {}
-
-  void Open(const string &hostport) {
-    Activate();
-    Layout();
-    CheckNullAssign(&chess_terminal, new ChessTerminalWindow(hostport));
-    chess_terminal->Open(term_dim.x, term_dim.y, FLAGS_default_font_size);
-    chess_terminal->terminal->SetColors(Singleton<TextGUI::StandardVGAColors>::Get());
-    chess_terminal->terminal->move_matcher.match_cb = bind(&ChessGUI::GameUpdateCB, this, _1);
-    chess_terminal->terminal->line_buf.cb = bind(&ChessGUI::LineCB, this, _1);
-  }
+  ChessGUI() : term(0, 0, 0, term_dim.y * Video::InitFontHeight()) {}
 
   Box SquareCoords(int p) const {
     int sx = Chess::SquareX(p), sy = Chess::SquareY(p);
@@ -113,15 +106,36 @@ struct ChessGUI : public GUI {
     return Chess::SquareFromXY(flip_board ? (7-sx) : sx, flip_board ? (7-sy) : sy);
   }
 
+  void Open(const string &hostport) {
+    Activate();
+    Layout();
+    CHECK(!chess_terminal);
+    chess_terminal = make_unique<ChessTerminalWindow>(hostport);
+    chess_terminal->Open(term_dim.x, term_dim.y, FLAGS_default_font_size);
+    chess_terminal->terminal->SetColors(Singleton<TextBox::StandardVGAColors>::Get());
+    chess_terminal->terminal->move_matcher.match_cb = bind(&ChessGUI::GameUpdateCB, this, _1);
+    chess_terminal->terminal->line_buf.cb = bind(&ChessGUI::LineCB, this, _1);
+  }
+
+  void FlipBoard(const vector<string>&) { flip_board = !flip_board; app->scheduler.Wakeup(0); }
+  void UpdateAnimating() { app->scheduler.SetAnimating(console_animating); }
+
+  void ConsoleAnimatingCB() {
+    console_animating = screen ? screen->console->animating : 0;
+    UpdateAnimating();
+  }
+
   void LoginCB(const string &s) {
     my_name = s.substr(0, s.find("("));
-    chess_terminal->controller->Write("\nset style 12\n");
+    chess_terminal->controller->Write("\nset seek 0\nset style 12\n");
     screen->SetCaption(StrCat(my_name, " @ ", FLAGS_connect));
   }
 
   void LineCB(const string &l) {
     static string login_prefix = "\r**** Starting FICS session as ", game_prefix = "\r{Game ";
     if (PrefixMatch(l, login_prefix)) LoginCB(StringWordIter(l.substr(login_prefix.size())).NextString());
+    else if (PrefixMatch(l, "\rIllegal move ") || PrefixMatch(l, "\rYou are not playing ") ||
+             PrefixMatch(l, "\rIt is not your move")) IllegalMoveCB();
     else if (PrefixMatch(l, game_prefix)) {
       StringWordIter words(l.substr(game_prefix.size()));
       int game_no = atoi(words.NextString());
@@ -137,7 +151,7 @@ struct ChessGUI : public GUI {
 
   void GameStartCB() {
     if (FLAGS_lfapp_audio) {
-      static SoundAsset *start_sound = soundasset("start");
+      static SoundAsset *start_sound = my_app->soundasset("start");
       app->PlaySoundEffect(start_sound);
     }
   }
@@ -181,7 +195,7 @@ struct ChessGUI : public GUI {
     move_capture = args[20].find("x") != string::npos;
 
     if (FLAGS_lfapp_audio) {
-      static SoundAsset *move_sound = soundasset("move"), *capture_sound = soundasset("capture");
+      static SoundAsset *move_sound = my_app->soundasset("move"), *capture_sound = my_app->soundasset("capture");
       app->PlaySoundEffect(move_capture ? capture_sound : move_sound);
     }
   }
@@ -190,8 +204,15 @@ struct ChessGUI : public GUI {
     game_number = 0;
     bool lose = (my_name == p1 && result == "0-1") || (my_name == p2 && result == "1-0");
     if (FLAGS_lfapp_audio) {
-      static SoundAsset *win_sound = soundasset("win"), *lose_sound = soundasset("lose");
+      static SoundAsset *win_sound = my_app->soundasset("win"), *lose_sound = my_app->soundasset("lose");
       app->PlaySoundEffect(lose ? lose_sound : win_sound);
+    }
+  }
+
+  void IllegalMoveCB() {
+    if (FLAGS_lfapp_audio) {
+      static SoundAsset *illegal_sound = my_app->soundasset("illegal");
+      app->PlaySoundEffect(illegal_sound);
     }
   }
 
@@ -216,9 +237,9 @@ struct ChessGUI : public GUI {
     MinusPlus(&win.h, &win.y, term.h);
     board = Box::DelBorder(win, Border(5,5,5,5));
     square_dim = point(board.w/8, board.h/8);
-    AddDragBox(board, MouseController::CoordCB(bind(&ChessGUI::DragCB, this, _1, _2, _3, _4)));
+    mouse.AddDragBox(board, MouseController::CoordCB(bind(&ChessGUI::DragCB, this, _1, _2, _3, _4)));
 
-    Texture *board_tex = &asset("board")->tex;
+    Texture *board_tex = &my_app->asset("board")->tex;
     child_box.PushBack(win, Drawable::Attr(board_tex), board_tex);
   }
 
@@ -227,16 +248,16 @@ struct ChessGUI : public GUI {
     if (game_number) {
       int secs = ToSeconds(now - update_time).count();
       int p1_s = p1_secs - (position.move_color ? 0 : secs), p2_s = p2_secs - (position.move_color ? secs : 0);
-      screen->SetCaption(StringPrintf("%s %d:%02d vs %s %d:%02d",
-                                      p1_name.c_str(), p1_s/60, p1_s%60,
-                                      p2_name.c_str(), p2_s/60, p2_s%60));
+      W->SetCaption(StringPrintf("%s %d:%02d vs %s %d:%02d",
+                                 p1_name.c_str(), p1_s/60, p1_s%60,
+                                 p2_name.c_str(), p2_s/60, p2_s%60));
     }
 
     chess_terminal->ReadAndUpdateTerminalFramebuffer();
     Draw();
 
     int black_font_index[7] = { 0, 3, 2, 0, 5, 4, 1 }, bits[65];
-    static Font *pieces = Fonts::Get("ChessPieces1");
+    static Font *pieces = app->fonts->Get("ChessPieces1");
     Drawable::Attr draw_attr(pieces);
     for (int i=Chess::PAWN; i <= Chess::KING; i++) {
       Bit::Indices(position.white[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(black_font_index[i]+6, SquareCoords(*b));
@@ -244,9 +265,9 @@ struct ChessGUI : public GUI {
     }
 
     if (move_square_from != -1 && move_square_to != -1) {
-      screen->gd->SetColor(Color(85, 85,  255)); BoxOutline(1).Draw(SquareCoords(move_square_from));
-      screen->gd->SetColor(Color(85, 255, 255)); BoxOutline(1).Draw(SquareCoords(move_square_to));
-      screen->gd->SetColor(Color::white);
+      W->gd->SetColor(Color(85, 85,  255)); BoxOutline(1).Draw(SquareCoords(move_square_from));
+      W->gd->SetColor(Color(85, 255, 255)); BoxOutline(1).Draw(SquareCoords(move_square_to));
+      W->gd->SetColor(Color::white);
     }
 
     if (drag_tracker.changing && dragging_piece.second) {
@@ -258,67 +279,72 @@ struct ChessGUI : public GUI {
     W->gd->DisableBlend();
     chess_terminal->terminal->Draw(term);
 
-    screen->DrawDialogs();
+    W->DrawDialogs();
     return 0;
   }
-} *chess_gui;
+};
 
-void UpdateAnimating() { app->scheduler.SetAnimating(console_animating); }
-void OnConsoleAnimating() { console_animating = screen->lfapp_console->animating; UpdateAnimating(); }
+void MyWindowInit(Window *W) {
+  screen->caption = "Chess";
+  screen->width = 630;
+  screen->height = 570 + initial_term_dim.y * Video::InitFontHeight();
+}
 
-void MyFlipBoardCmd(const vector<string>&) {
-  chess_gui->flip_board = !chess_gui->flip_board;
-  app->scheduler.Wakeup(0);
+void MyWindowStart(Window *W) {
+  ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>());
+  W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
+  if (FLAGS_lfapp_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
+
+  W->shell = make_unique<Shell>(&my_app->asset, &my_app->soundasset, nullptr);
+  W->shell->Add("flip", bind(&ChessGUI::FlipBoard, chess_gui, _1));
+
+  BindMap *binds = W->AddInputController(make_unique<BindMap>());
+  binds->Add(Key::Escape,                   Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
+  binds->Add('6',       Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, W->shell.get(), vector<string>())));
+  binds->Add(Key::Up,   Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->ScrollHistory(1); })));
+  binds->Add(Key::Down, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->ScrollHistory(0); })));
+  binds->Add('f',       Key::Modifier::Cmd, Bind::CB(bind([=](){ W->shell->console(vector<string>(1, "flip")); })));
 }
 
 }; // namespace LFL
 using namespace LFL;
 
 extern "C" void LFAppCreateCB() {
-#ifdef LFL_DEBUG
-  app->logfilename = StrCat(LFAppDownloadDir(), "chess.txt");
-#endif
   FLAGS_lfapp_video = FLAGS_lfapp_audio = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_lfapp_console = 1;
   FLAGS_default_font_flag = FLAGS_lfapp_console_font_flag = 0;
   FLAGS_lfapp_console_font = "Nobile.ttf";
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
-  screen->caption = "Chess";
-  screen->width = 630;
-  chess_gui = new ChessGUI();
-  screen->height = 570 + chess_gui->term.h;
-  screen->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
+#ifdef LFL_DEBUG
+  app->logfilename = StrCat(LFAppDownloadDir(), "chess.txt");
+#endif
+  app->window_start_cb = MyWindowStart;
+  app->window_init_cb = MyWindowInit;
+  app->window_init_cb(screen);
+  app->exit_cb = [](){ delete my_app; };
 }
 
 extern "C" int main(int argc, const char *argv[]) {
-  if (app->Create(argc, argv, __FILE__, LFAppCreateCB)) { app->Free(); return -1; }
-  if (app->Init())                                      { app->Free(); return -1; }
+  if (app->Create(argc, argv, __FILE__, LFAppCreateCB)) return -1;
+  if (app->Init())                                      return -1;
+
+  app->fonts->atlas_engine.get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
   app->scheduler.AddWaitForeverKeyboard();
   app->scheduler.AddWaitForeverMouse();
-  app->shell.command.push_back(Shell::Command("flip", bind(&MyFlipBoardCmd, _1)));
-  if (screen->lfapp_console) screen->lfapp_console->animating_cb = OnConsoleAnimating;
-  Singleton<AtlasFontEngine>::Get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
+  app->window_start_cb(screen);
 
-  // asset.Add(Asset(name, texture,     scale, translate, rotate, geometry, 0, 0, 0));
-  asset.Add(Asset("board", "board.png", 0,     0,         0,      0,        0, 0, 0));
-  asset.Load();
-  app->shell.assets = &asset;
+  // my_app->asset.Add(name, texture,     scale, translate, rotate, geometry, hull,    0, 0);
+  my_app->asset.Add("board", "board.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
+  my_app->asset.Load();
 
-  // soundasset.Add(SoundAsset(name,   filename,      ringbuf, channels, sample_rate, seconds ));
-  soundasset.Add(SoundAsset("start",   "start.wav",   0,       0,        0,           0       ));
-  soundasset.Add(SoundAsset("move",    "move.wav",    0,       0,        0,           0       ));
-  soundasset.Add(SoundAsset("capture", "capture.wav", 0,       0,        0,           0       ));
-  soundasset.Add(SoundAsset("win",     "win.wav",     0,       0,        0,           0       ));
-  soundasset.Add(SoundAsset("lose",    "lose.wav",    0,       0,        0,           0       ));
-  soundasset.Load();
-  app->shell.soundassets = &soundasset;
-
-  BindMap *binds = screen->binds = new BindMap();
-  binds->Add(Bind(Key::Escape,                   Bind::CB(bind(&Shell::quit,    &app->shell, vector<string>()))));
-  binds->Add(Bind('6',       Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, &app->shell, vector<string>()))));
-  binds->Add(Bind(Key::Up,   Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->ScrollHistory(1); }))));
-  binds->Add(Bind(Key::Down, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->ScrollHistory(0); }))));
-  binds->Add(Bind('f',       Key::Modifier::Cmd, Bind::CB(bind([=](){ app->shell.console(vector<string>(1, "flip")); }))));
+  // my_app->soundasset.Add(name,   filename,      ringbuf, channels, sample_rate, seconds );
+  my_app->soundasset.Add("start",   "start.wav",   nullptr, 0,        0,           0       );
+  my_app->soundasset.Add("move",    "move.wav",    nullptr, 0,        0,           0       );
+  my_app->soundasset.Add("capture", "capture.wav", nullptr, 0,        0,           0       );
+  my_app->soundasset.Add("win",     "win.wav",     nullptr, 0,        0,           0       );
+  my_app->soundasset.Add("lose",    "lose.wav",    nullptr, 0,        0,           0       );
+  my_app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
+  my_app->soundasset.Load();
 
   vector<MenuItem> file_menu{ MenuItem{ "q", "Quit LChess", "quit" } };
   vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" } };
@@ -326,6 +352,6 @@ extern "C" int main(int argc, const char *argv[]) {
   app->AddNativeEditMenu();
   app->AddNativeMenu("View", view_menu);
 
-  chess_gui->Open(FLAGS_connect);
+  screen->GetGUI<ChessGUI>(0)->Open(FLAGS_connect);
   return app->Main();
 }

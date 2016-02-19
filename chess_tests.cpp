@@ -6,7 +6,7 @@ using namespace LFL;
 using namespace LFL::Chess;
 
 GTEST_API_ int main(int argc, const char **argv) {
-  testing::InitGoogleTest(&argc, (char**)argv);
+  testing::InitGoogleTest(&argc, const_cast<char**>(argv));
   LFL::FLAGS_default_font = LFL::FakeFontEngine::Filename();
   CHECK_EQ(0, LFL::app->Create(argc, argv, __FILE__));
   exit(RUN_ALL_TESTS());

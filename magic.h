@@ -110,7 +110,7 @@ static BitBoard king_occupancy_mask[] = {
 };
 
 int MagicHash(BitBoard occupancy, BitBoard magic_number, int magic_number_bits) {
-  return (int)((occupancy * magic_number) >> (64 - magic_number_bits));
+  return int((occupancy * magic_number) >> (64 - magic_number_bits));
 } 
 int MagicHash(int p, BitBoard occupancy, const BitBoard *magic_number, const int *magic_number_bits) {
   return MagicHash(occupancy, magic_number[p], magic_number_bits[p]);
@@ -191,9 +191,9 @@ void GenerateBishopMagicMoves(int p, const vector<BitBoard> &occupancy_variation
 void GenerateMagicNumbers(int p, const BitBoard *occupancyMask, const vector<BitBoard> &occupancy_variation, const vector<BitBoard> &attack_set,
                           BitBoard *magic_number_out, int *magic_number_bits_out)
 {
-  int bit_count=Bit::Count(occupancyMask[p]), variation_count=(int)(1L << bit_count);
-  BitBoard *used_by = (BitBoard*)alloca(sizeof(BitBoard)*(int)(1L << bit_count)), magic_number;
-  memset(used_by, 0,                    sizeof(BitBoard)*(int)(1L << bit_count));
+  int bit_count=Bit::Count(occupancyMask[p]), variation_count=int(1L << bit_count);
+  vector<BitBoard> used_by(int(1L << bit_count), 0);
+  BitBoard magic_number;
 
   bool fail=0;
   for (int attempts=0; /**/; ++attempts, fail=0) {

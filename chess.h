@@ -104,7 +104,7 @@ static const char *SquareName(int s) {
 string BitBoardToString(BitBoard b) {
   string ret;
   for (int i=7; i>=0; i--) {
-    for (int j=7; j>=0; j--) StrAppend(&ret, (bool)(b & (1L<<(i*8+j))));
+    for (int j=7; j>=0; j--) StrAppend(&ret, bool(b & (1L<<(i*8+j))));
     StrAppend(&ret, "\n");
   }
   return ret;
