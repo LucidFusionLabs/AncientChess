@@ -16,13 +16,13 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "lfapp/lfapp.h"
-#include "lfapp/dom.h"
-#include "lfapp/css.h"
-#include "lfapp/flow.h"
-#include "lfapp/gui.h"
+#include "core/app/app.h"
+#include "core/web/dom.h"
+#include "core/web/css.h"
+#include "core/app/flow.h"
+#include "core/app/gui.h"
 #include "chess.h"
-#include "../term/term.h"
+#include "term/term.h"
 
 namespace LFL {
 DEFINE_string(connect, "freechess.org:5000", "Connect to server");
@@ -41,8 +41,8 @@ struct ChessTerminal : public Terminal {
   AhoCorasickFSM<char> move_fsm;
   StringMatcher<char> move_matcher;
 
-  ChessTerminal(ByteSink *O, const FontDesc &F) :
-    Terminal(O, screen->gd, F), local_cmd(app->fonts->DefaultDesc()), move_fsm({"\r<12> "}),
+  ChessTerminal(ByteSink *O, GraphicsDevice *D, const FontRef &F) :
+    Terminal(O, D, F), local_cmd(F), move_fsm({"\r<12> "}),
     move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
   }
@@ -75,12 +75,7 @@ struct ChessTerminal : public Terminal {
   }
 };
 
-struct ChessTerminalWindow : public TerminalWindowT<ChessTerminal> {
-  ChessTerminalWindow(const string &hostport) :
-    TerminalWindowT(new NetworkTerminalController(app->net->http_client.get(), hostport)) {
-    controller->frame_on_keyboard_input = true;
-  }
-};
+typedef TerminalWindowT<ChessTerminal> ChessTerminalWindow;
 
 struct ChessGUI : public GUI {
   point term_dim=initial_term_dim, square_dim;
@@ -109,9 +104,10 @@ struct ChessGUI : public GUI {
   void Open(const string &hostport) {
     Activate();
     Layout();
-    CHECK(!chess_terminal);
-    chess_terminal = make_unique<ChessTerminalWindow>(hostport);
-    chess_terminal->Open(term_dim.x, term_dim.y, FLAGS_default_font_size);
+    auto c = make_unique<NetworkTerminalController>(app->net->tcp_client.get(), hostport,
+                                                    bind(&ChessGUI::ClosedCB, this));
+    c->frame_on_keyboard_input = true;
+    chess_terminal->ChangeController(move(c));
     chess_terminal->terminal->SetColors(Singleton<TextBox::StandardVGAColors>::Get());
     chess_terminal->terminal->move_matcher.match_cb = bind(&ChessGUI::GameUpdateCB, this, _1);
     chess_terminal->terminal->line_buf.cb = bind(&ChessGUI::LineCB, this, _1);
@@ -119,6 +115,7 @@ struct ChessGUI : public GUI {
 
   void FlipBoard(const vector<string>&) { flip_board = !flip_board; app->scheduler.Wakeup(0); }
   void UpdateAnimating() { app->scheduler.SetAnimating(console_animating); }
+  void ClosedCB() {}
 
   void ConsoleAnimatingCB() {
     console_animating = screen ? screen->console->animating : 0;
@@ -132,7 +129,7 @@ struct ChessGUI : public GUI {
   }
 
   void LineCB(const string &l) {
-    static string login_prefix = "\r**** Starting FICS session as ", game_prefix = "\r{Game ";
+    static const string login_prefix = "\r**** Starting FICS session as ", game_prefix = "\r{Game ";
     if (PrefixMatch(l, login_prefix)) LoginCB(StringWordIter(l.substr(login_prefix.size())).NextString());
     else if (PrefixMatch(l, "\rIllegal move ") || PrefixMatch(l, "\rYou are not playing ") ||
              PrefixMatch(l, "\rIt is not your move")) IllegalMoveCB();
@@ -265,8 +262,8 @@ struct ChessGUI : public GUI {
     }
 
     if (move_square_from != -1 && move_square_to != -1) {
-      W->gd->SetColor(Color(85, 85,  255)); BoxOutline(1).Draw(SquareCoords(move_square_from));
-      W->gd->SetColor(Color(85, 255, 255)); BoxOutline(1).Draw(SquareCoords(move_square_to));
+      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(SquareCoords(move_square_from));
+      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(SquareCoords(move_square_to));
       W->gd->SetColor(Color::white);
     }
 
@@ -292,8 +289,13 @@ void MyWindowInit(Window *W) {
 
 void MyWindowStart(Window *W) {
   ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>());
+  chess_gui->chess_terminal = make_unique<ChessTerminalWindow>
+    (W->AddGUI(make_unique<ChessTerminal>(nullptr, W->gd, W->default_font)),
+     chess_gui->term_dim.x, chess_gui->term_dim.y);
+
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
-  if (FLAGS_lfapp_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
+  W->default_textbox = [=]{ return chess_gui->chess_terminal->terminal; };
+  if (FLAGS_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
 
   W->shell = make_unique<Shell>(&my_app->asset, &my_app->soundasset, nullptr);
   W->shell->Add("flip", bind(&ChessGUI::FlipBoard, chess_gui, _1));
@@ -301,18 +303,18 @@ void MyWindowStart(Window *W) {
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                   Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
   binds->Add('6',       Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, W->shell.get(), vector<string>())));
-  binds->Add(Key::Up,   Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->ScrollHistory(1); })));
-  binds->Add(Key::Down, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->ScrollHistory(0); })));
+  binds->Add(Key::Up,   Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollUp();   app->scheduler.Wakeup(0); })));
+  binds->Add(Key::Down, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(0); })));
   binds->Add('f',       Key::Modifier::Cmd, Bind::CB(bind([=](){ W->shell->console(vector<string>(1, "flip")); })));
 }
 
 }; // namespace LFL
 using namespace LFL;
 
-extern "C" void LFAppCreateCB() {
-  FLAGS_lfapp_video = FLAGS_lfapp_audio = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_lfapp_console = 1;
-  FLAGS_default_font_flag = FLAGS_lfapp_console_font_flag = 0;
-  FLAGS_lfapp_console_font = "Nobile.ttf";
+extern "C" void MyAppInit() {
+  FLAGS_lfapp_video = FLAGS_lfapp_audio = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_console = 1;
+  FLAGS_default_font_flag = FLAGS_console_font_flag = 0;
+  FLAGS_console_font = "Nobile.ttf";
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
 #ifdef LFL_DEBUG
@@ -324,14 +326,14 @@ extern "C" void LFAppCreateCB() {
   app->exit_cb = [](){ delete my_app; };
 }
 
-extern "C" int main(int argc, const char *argv[]) {
-  if (app->Create(argc, argv, __FILE__, LFAppCreateCB)) return -1;
-  if (app->Init())                                      return -1;
+extern "C" int MyAppMain(int argc, const char* const* argv) {
+  if (app->Create(argc, argv, __FILE__)) return -1;
+  if (app->Init())                       return -1;
 
   app->fonts->atlas_engine.get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
   app->scheduler.AddWaitForeverKeyboard();
   app->scheduler.AddWaitForeverMouse();
-  app->window_start_cb(screen);
+  app->StartNewWindow(screen);
 
   // my_app->asset.Add(name, texture,     scale, translate, rotate, geometry, hull,    0, 0);
   my_app->asset.Add("board", "board.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);

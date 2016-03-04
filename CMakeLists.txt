@@ -1,30 +1,20 @@
 # $Id: CMakeLists.txt 1320 2014-10-26 08:12:52Z justin $
 
-set(LFL_PNG 1)
-set(LFL_GLES2 1)
-set(LFL_LFLINPUT 1)
-set(LFL_LFLVIDEO 1)
-
-if(NOT WIN32 AND NOT LFL_ANDROID)
-  set(LFL_ICONV 1)
-endif()
-if(LFL_ANDROID)
-elseif(LFL_IPHONE)
-else()
-  set(LFL_GLEW 1)
-  set(LFL_PORTAUDIO 1)
-  if(NOT WIN32)
-    set(LFL_GLOG 1)
-  endif()
-endif()
-
 lfl_project(chess)
-add_subdirectory(../core/lfapp ${CMAKE_CURRENT_BINARY_DIR}/${LFL_PROJECT}_lfapp_obj)
-lfapp_add_target(chess chess.cpp)
-target_compile_definitions(chess PUBLIC ${LFAPP_DEF})
-target_include_directories(chess PUBLIC ${LFAPP_INCLUDE})
-lfapp_post_build_start(chess chess LChess)
+lfl_add_target(chess chess.cpp)
+target_compile_definitions(chess PUBLIC ${LFL_APP_DEF})
+target_include_directories(chess PUBLIC ${LFL_APP_INCLUDE})
+target_link_libraries(chess ${LFL_APP_LIB} ${LFL_APP_OS} ${LFL_APP_FRAMEWORK} ${LFL_APP_GRAPHICS}
+                      ${LFL_APP_AUDIO} app_null_camera app_null_matrix app_null_fft
+                      app_simple_resampler app_simple_loader ${LFL_APP_CONVERT}
+                      app_libpng_png app_null_jpeg app_null_gif app_null_css app_null_ttf app_null_ssl
+                      app_null_js app_null_tu)
+lfl_post_build_start(chess chess LChess)
 
 add_executable(chess_tests chess_tests.cpp)
 target_include_directories(chess_tests PUBLIC ${GTEST_INCLUDE})
-target_link_libraries(chess_tests ${LFAPP_LIB} ${GTEST_LIB})
+target_link_libraries(chess_tests ${LFL_APP_LIB} ${GTEST_LIB} app_null_os app_null_framework app_null_graphics
+                      app_null_audio app_null_camera app_null_matrix app_null_fft
+                      app_simple_resampler app_simple_loader ${LFL_APP_CONVERT}
+                      app_null_png app_null_jpeg app_null_gif app_null_css app_null_ttf app_null_ssl
+                      app_null_js app_null_tu)
