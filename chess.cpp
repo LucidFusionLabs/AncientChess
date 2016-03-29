@@ -32,7 +32,7 @@ const point initial_term_dim(0, 10);
 struct MyAppState {
   AssetMap asset;
   SoundAssetMap soundasset;
-} *my_app = new MyAppState();
+} *my_app;
 
 struct ChessTerminal : public Terminal {
   string prompt = "fics%", filter_prompt = StrCat("\n\r", prompt, " ");
@@ -41,8 +41,8 @@ struct ChessTerminal : public Terminal {
   AhoCorasickFSM<char> move_fsm;
   StringMatcher<char> move_matcher;
 
-  ChessTerminal(ByteSink *O, GraphicsDevice *D, const FontRef &F) :
-    Terminal(O, D, F), local_cmd(F), move_fsm({"\r<12> "}),
+  ChessTerminal(ByteSink *O, GraphicsDevice *D, const FontRef &F, const point &dim) :
+    Terminal(O, D, F, dim), local_cmd(F), move_fsm({"\r<12> "}),
     move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
   }
@@ -78,8 +78,10 @@ struct ChessTerminal : public Terminal {
 typedef TerminalWindowT<ChessTerminal> ChessTerminalWindow;
 
 struct ChessGUI : public GUI {
-  point term_dim=initial_term_dim, square_dim;
+  point term_dim=initial_term_dim;
+  v2 square_dim;
   Box win, board, term;
+  Widget::Divider divider;
   Time update_time;
   Chess::Position position;
   string my_name, p1_name, p2_name;
@@ -88,12 +90,12 @@ struct ChessGUI : public GUI {
   unique_ptr<ChessTerminalWindow> chess_terminal;
   DragTracker drag_tracker;
   pair<bool, int> dragging_piece;
-  ChessGUI() : term(0, 0, 0, term_dim.y * Video::InitFontHeight()) {}
+  ChessGUI() : divider(this, true, term_dim.y * Fonts::InitFontHeight()) {}
 
   Box SquareCoords(int p) const {
     int sx = Chess::SquareX(p), sy = Chess::SquareY(p);
     return Box(board.x + (flip_board ? (7-sx) : sx) * square_dim.x,
-               board.y + (flip_board ? (7-sy) : sy) * square_dim.y, square_dim.x, square_dim.y);
+               board.y + (flip_board ? (7-sy) : sy) * square_dim.y, square_dim.x, square_dim.y, true);
   }
 
   int SquareFromCoords(const point &p) const {
@@ -103,7 +105,6 @@ struct ChessGUI : public GUI {
 
   void Open(const string &hostport) {
     Activate();
-    Layout();
     auto c = make_unique<NetworkTerminalController>(app->net->tcp_client.get(), hostport,
                                                     bind(&ChessGUI::ClosedCB, this));
     c->frame_on_keyboard_input = true;
@@ -228,12 +229,13 @@ struct ChessGUI : public GUI {
   }
 
   void Layout() {
+    Reset();
     win = screen->Box();
     term.w = win.w;
-    term_dim.x = win.w / Video::InitFontWidth();
-    MinusPlus(&win.h, &win.y, term.h);
+    term_dim.x = win.w / Fonts::InitFontWidth();
+    divider.LayoutDivideBottom(win, &win, &term);
     board = Box::DelBorder(win, Border(5,5,5,5));
-    square_dim = point(board.w/8, board.h/8);
+    square_dim = v2(board.w/8.0, board.h/8.0);
     mouse.AddDragBox(board, MouseController::CoordCB(bind(&ChessGUI::DragCB, this, _1, _2, _3, _4)));
 
     Texture *board_tex = &my_app->asset("board")->tex;
@@ -251,6 +253,7 @@ struct ChessGUI : public GUI {
     }
 
     chess_terminal->ReadAndUpdateTerminalFramebuffer();
+    if (divider.changed) Layout();
     Draw();
 
     int black_font_index[7] = { 0, 3, 2, 0, 5, 4, 1 }, bits[65];
@@ -275,6 +278,7 @@ struct ChessGUI : public GUI {
 
     W->gd->DisableBlend();
     chess_terminal->terminal->Draw(term);
+    if (divider.changing) BoxOutline().Draw(Box::DelBorder(term, Border(1,1,1,1)));
 
     W->DrawDialogs();
     return 0;
@@ -284,14 +288,13 @@ struct ChessGUI : public GUI {
 void MyWindowInit(Window *W) {
   screen->caption = "Chess";
   screen->width = 630;
-  screen->height = 570 + initial_term_dim.y * Video::InitFontHeight();
+  screen->height = 570 + initial_term_dim.y * Fonts::InitFontHeight();
 }
 
 void MyWindowStart(Window *W) {
   ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>());
   chess_gui->chess_terminal = make_unique<ChessTerminalWindow>
-    (W->AddGUI(make_unique<ChessTerminal>(nullptr, W->gd, W->default_font)),
-     chess_gui->term_dim.x, chess_gui->term_dim.y);
+    (W->AddGUI(make_unique<ChessTerminal>(nullptr, W->gd, W->default_font, chess_gui->term_dim)));
 
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
   W->default_textbox = [=]{ return chess_gui->chess_terminal->terminal; };
@@ -311,15 +314,18 @@ void MyWindowStart(Window *W) {
 }; // namespace LFL
 using namespace LFL;
 
-extern "C" void MyAppInit() {
+extern "C" void MyAppCreate() {
   FLAGS_lfapp_video = FLAGS_lfapp_audio = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_console = 1;
   FLAGS_default_font_flag = FLAGS_console_font_flag = 0;
   FLAGS_console_font = "Nobile.ttf";
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
 #ifdef LFL_DEBUG
-  app->logfilename = StrCat(LFAppDownloadDir(), "chess.txt");
+  FLAGS_logfile = StrCat("chess.txt");
 #endif
+  app = new Application();
+  screen = new Window();
+  my_app = new MyAppState();
   app->window_start_cb = MyWindowStart;
   app->window_init_cb = MyWindowInit;
   app->window_init_cb(screen);
@@ -328,7 +334,7 @@ extern "C" void MyAppInit() {
 
 extern "C" int MyAppMain(int argc, const char* const* argv) {
   if (app->Create(argc, argv, __FILE__)) return -1;
-  if (app->Init())                       return -1;
+  if (app->Init()) return -1;
 
   app->fonts->atlas_engine.get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
   app->scheduler.AddWaitForeverKeyboard();

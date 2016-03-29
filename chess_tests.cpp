@@ -5,8 +5,13 @@
 using namespace LFL;
 using namespace LFL::Chess;
 
-extern "C" void MyAppInit() {}
+extern "C" void MyAppCreate() {
+  app = new Application();
+  screen = new Window();
+}
+
 extern "C" int MyAppMain(int argc, const char* const* argv) {
+  if (!app) MyAppCreate();
   testing::InitGoogleTest(&argc, const_cast<char**>(argv));
   LFL::FLAGS_default_font = LFL::FakeFontEngine::Filename();
   CHECK_EQ(0, LFL::app->Create(argc, argv, __FILE__));
