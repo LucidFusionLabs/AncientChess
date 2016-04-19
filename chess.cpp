@@ -28,10 +28,10 @@ namespace LFL {
 DEFINE_string(connect, "freechess.org:5000", "Connect to server");
 DEFINE_bool(print_board_updates, false, "Print board updatees");
 
-const point initial_term_dim(0, 10);
 struct MyAppState {
   AssetMap asset;
   SoundAssetMap soundasset;
+  point initial_term_dim = point(0, 10);
 } *my_app;
 
 struct ChessTerminal : public Terminal {
@@ -78,7 +78,7 @@ struct ChessTerminal : public Terminal {
 typedef TerminalWindowT<ChessTerminal> ChessTerminalWindow;
 
 struct ChessGUI : public GUI {
-  point term_dim=initial_term_dim;
+  point term_dim=my_app->initial_term_dim;
   v2 square_dim;
   Box win, board, term;
   Widget::Divider divider;
@@ -109,7 +109,7 @@ struct ChessGUI : public GUI {
                                                     bind(&ChessGUI::ClosedCB, this));
     c->frame_on_keyboard_input = true;
     chess_terminal->ChangeController(move(c));
-    chess_terminal->terminal->SetColors(Singleton<TextBox::StandardVGAColors>::Get());
+    chess_terminal->terminal->SetColors(Singleton<Terminal::StandardVGAColors>::Get());
     chess_terminal->terminal->move_matcher.match_cb = bind(&ChessGUI::GameUpdateCB, this, _1);
     chess_terminal->terminal->line_buf.cb = bind(&ChessGUI::LineCB, this, _1);
   }
@@ -288,7 +288,7 @@ struct ChessGUI : public GUI {
 void MyWindowInit(Window *W) {
   screen->caption = "Chess";
   screen->width = 630;
-  screen->height = 570 + initial_term_dim.y * Fonts::InitFontHeight();
+  screen->height = 570 + my_app->initial_term_dim.y * Fonts::InitFontHeight();
 }
 
 void MyWindowStart(Window *W) {
@@ -308,7 +308,6 @@ void MyWindowStart(Window *W) {
   binds->Add('6',       Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, W->shell.get(), vector<string>())));
   binds->Add(Key::Up,   Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollUp();   app->scheduler.Wakeup(0); })));
   binds->Add(Key::Down, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(0); })));
-  binds->Add('f',       Key::Modifier::Cmd, Bind::CB(bind([=](){ W->shell->console(vector<string>(1, "flip")); })));
 }
 
 }; // namespace LFL
@@ -357,7 +356,7 @@ extern "C" int MyAppMain(int argc, const char* const* argv) {
   vector<MenuItem> file_menu{ MenuItem{ "q", "Quit LChess", "quit" } };
   vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" } };
   app->AddNativeMenu("LChess", file_menu);
-  app->AddNativeEditMenu();
+  app->AddNativeEditMenu(vector<MenuItem>());
   app->AddNativeMenu("View", view_menu);
 
   screen->GetGUI<ChessGUI>(0)->Open(FLAGS_connect);
