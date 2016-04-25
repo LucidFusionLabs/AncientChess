@@ -10,11 +10,12 @@ Section "";
 RmDir /r "$INSTDIR"
 
 SetOutPath "$INSTDIR"
-File "Debug\chess.exe"
-File "Debug\*.dll"
+File "..\Win32\chess\Debug\chess.exe"
 
 SetOutPath "$INSTDIR\assets"
 File "assets\*"
+File "..\core\app\assets\Nobile.ttf,32,*"
+File "..\core\app\shaders\default.*"
 
 SetOutPath "$INSTDIR"
 CreateDirectory "$SMPROGRAMS\com.lucidfusionlabs"

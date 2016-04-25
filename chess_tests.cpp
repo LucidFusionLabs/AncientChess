@@ -40,10 +40,10 @@ TEST(SquaresTests, Names) {
 TEST(OccupancyMaskTest, Rook) {
   for (int p=0; p<64; p++) {
     BitBoard mask = 0;
-    for (int i=p+8; i<56;                    i+=8) mask |= (1L<<i);
-    for (int i=p-8; i>=8;                    i-=8) mask |= (1L<<i);
-    for (int i=p+1; i%8!=7 && i%8!=0;         i++) mask |= (1L<<i);
-    for (int i=p-1; i%8!=7 && i%8!=0 && i>=0; i--) mask |= (1L<<i);
+    for (int i=p+8; i<56;                    i+=8) mask |= (1ULL<<i);
+    for (int i=p-8; i>=8;                    i-=8) mask |= (1ULL<<i);
+    for (int i=p+1; i%8!=7 && i%8!=0;         i++) mask |= (1ULL<<i);
+    for (int i=p-1; i%8!=7 && i%8!=0 && i>=0; i--) mask |= (1ULL<<i);
     EXPECT_EQ(rook_occupancy_mask[p], mask);
   }
 }
@@ -51,10 +51,10 @@ TEST(OccupancyMaskTest, Rook) {
 TEST(OccupancyMaskTest, Bishop) {
   for (int p=0; p<64; p++) {
     BitBoard mask = 0;
-    for (int i=p+9; i%8!=7 && i%8!=0 && i< 56; i+=9) mask |= (1L<<i);
-    for (int i=p-9; i%8!=7 && i%8!=0 && i>= 8; i-=9) mask |= (1L<<i);
-    for (int i=p+7; i%8!=7 && i%8!=0 && i< 56; i+=7) mask |= (1L<<i);
-    for (int i=p-7; i%8!=7 && i%8!=0 && i>= 8; i-=7) mask |= (1L<<i);
+    for (int i=p+9; i%8!=7 && i%8!=0 && i< 56; i+=9) mask |= (1ULL<<i);
+    for (int i=p-9; i%8!=7 && i%8!=0 && i>= 8; i-=9) mask |= (1ULL<<i);
+    for (int i=p+7; i%8!=7 && i%8!=0 && i< 56; i+=7) mask |= (1ULL<<i);
+    for (int i=p-7; i%8!=7 && i%8!=0 && i>= 8; i-=7) mask |= (1ULL<<i);
     EXPECT_EQ(bishop_occupancy_mask[p], mask);
   }
 }
@@ -62,14 +62,14 @@ TEST(OccupancyMaskTest, Bishop) {
 TEST(OccupancyMaskTest, Knight) {
   for (int p=0; p<64; p++) {
     BitBoard mask = 0;
-    if (p%8!=6 && p%8!=7 && p+10 < 64) mask |= (1L<<(p+10));
-    if (          p%8!=7 && p+17 < 64) mask |= (1L<<(p+17));
-    if (p%8!=1 && p%8!=0 && p+ 6 < 64) mask |= (1L<<(p+ 6));
-    if (          p%8!=0 && p+15 < 64) mask |= (1L<<(p+15));
-    if (p%8!=1 && p%8!=0 && p-10 >= 0) mask |= (1L<<(p-10));
-    if (          p%8!=0 && p-17 >= 0) mask |= (1L<<(p-17));
-    if (p%8!=6 && p%8!=7 && p- 6 >= 0) mask |= (1L<<(p- 6));
-    if (          p%8!=7 && p-15 >= 0) mask |= (1L<<(p-15));
+    if (p%8!=6 && p%8!=7 && p+10 < 64) mask |= (1ULL<<(p+10));
+    if (          p%8!=7 && p+17 < 64) mask |= (1ULL<<(p+17));
+    if (p%8!=1 && p%8!=0 && p+ 6 < 64) mask |= (1ULL<<(p+ 6));
+    if (          p%8!=0 && p+15 < 64) mask |= (1ULL<<(p+15));
+    if (p%8!=1 && p%8!=0 && p-10 >= 0) mask |= (1ULL<<(p-10));
+    if (          p%8!=0 && p-17 >= 0) mask |= (1ULL<<(p-17));
+    if (p%8!=6 && p%8!=7 && p- 6 >= 0) mask |= (1ULL<<(p- 6));
+    if (          p%8!=7 && p-15 >= 0) mask |= (1ULL<<(p-15));
     EXPECT_EQ(knight_occupancy_mask[p], mask);
   }
 }
@@ -77,14 +77,14 @@ TEST(OccupancyMaskTest, Knight) {
 TEST(OccupancyMaskTest, King) {
   for (int p=0; p<64; p++) {
     BitBoard mask = 0;
-    if (            p+8 < 64) mask |= (1L<<(p+8));
-    if (            p-8 >= 0) mask |= (1L<<(p-8));
-    if (p%8 != 0 && p-1 >= 0) mask |= (1L<<(p-1));
-    if (p%8 != 0 && p-9 >= 0) mask |= (1L<<(p-9));
-    if (p%8 != 0 && p+7 < 64) mask |= (1L<<(p+7));
-    if (p%8 != 7 && p+1 < 64) mask |= (1L<<(p+1));
-    if (p%8 != 7 && p+9 < 64) mask |= (1L<<(p+9));
-    if (p%8 != 7 && p-7 >= 0) mask |= (1L<<(p-7));
+    if (            p+8 < 64) mask |= (1ULL<<(p+8));
+    if (            p-8 >= 0) mask |= (1ULL<<(p-8));
+    if (p%8 != 0 && p-1 >= 0) mask |= (1ULL<<(p-1));
+    if (p%8 != 0 && p-9 >= 0) mask |= (1ULL<<(p-9));
+    if (p%8 != 0 && p+7 < 64) mask |= (1ULL<<(p+7));
+    if (p%8 != 7 && p+1 < 64) mask |= (1ULL<<(p+1));
+    if (p%8 != 7 && p+9 < 64) mask |= (1ULL<<(p+9));
+    if (p%8 != 7 && p-7 >= 0) mask |= (1ULL<<(p-7));
     EXPECT_EQ(king_occupancy_mask[p], mask);
   }
 }

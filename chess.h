@@ -104,7 +104,7 @@ static const char *SquareName(int s) {
 string BitBoardToString(BitBoard b) {
   string ret;
   for (int i=7; i>=0; i--) {
-    for (int j=7; j>=0; j--) StrAppend(&ret, bool(b & (1L<<(i*8+j))));
+    for (int j=7; j>=0; j--) StrAppend(&ret, bool(b & (1ULL<<(i*8+j))));
     StrAppend(&ret, "\n");
   }
   return ret;
@@ -113,7 +113,7 @@ string BitBoardToString(BitBoard b) {
 BitBoard BitBoardFromString(const char *buf, char v='1') {
   BitBoard ret = 0;
   for (int i=7, bi=0; i>=0; i--, bi++) {
-    for (int j=7; j>=0; j--, bi++) if (buf[bi] == v) ret |= (1L<<(i*8+j));
+    for (int j=7; j>=0; j--, bi++) if (buf[bi] == v) ret |= (1ULL<<(i*8+j));
   }
   return ret;
 }
@@ -121,7 +121,7 @@ BitBoard BitBoardFromString(const char *buf, char v='1') {
 BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
   BitBoard ret = 0;
   for (int i=7, bi=0; i>=0; i--, bi++) {
-    for (int j=7; j>=0; j--, bi++) if (buf[bi] == piece) ret |= (1L<<(i*8+j));
+    for (int j=7; j>=0; j--, bi++) if (buf[bi] == piece) ret |= (1ULL<<(i*8+j));
   }
   return ret;
 }
@@ -198,8 +198,8 @@ static BitBoard BishopMoves(const Position &in, int p, bool black) {
 static BitBoard RookMoves(const Position &in, int p, bool black) {
   static MagicMoves *magic_moves = Singleton<MagicMoves>::Get();
   BitBoard blockers = in.AllPieces() & rook_occupancy_mask[p];
-  int magicIndex = MagicHash(p, blockers, rook_magic_number, rook_magic_number_bits);
-  return magic_moves->rook_magic_moves[p][magicIndex] & ~in.Pieces(black)[ALL];
+  int magic_index = MagicHash(p, blockers, rook_magic_number, rook_magic_number_bits);
+  return magic_moves->rook_magic_moves[p][magic_index] & ~in.Pieces(black)[ALL];
 }
 
 static BitBoard QueenMoves(const Position &in, int p, bool black) {

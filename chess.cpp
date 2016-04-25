@@ -135,7 +135,7 @@ struct ChessGUI : public GUI {
     else if (PrefixMatch(l, "\rIllegal move ") || PrefixMatch(l, "\rYou are not playing ") ||
              PrefixMatch(l, "\rIt is not your move")) IllegalMoveCB();
     else if (PrefixMatch(l, game_prefix)) {
-      StringWordIter words(l.substr(game_prefix.size()));
+      StringWordIter words(l.data() + game_prefix.size(), l.size() - game_prefix.size());
       int game_no = atoi(words.NextString());
       string p1 = words.NextString(), res = words.NextString(), p2 = words.NextString();
       bool first_trailing = true;
@@ -297,7 +297,7 @@ void MyWindowStart(Window *W) {
     (W->AddGUI(make_unique<ChessTerminal>(nullptr, W->gd, W->default_font, chess_gui->term_dim)));
 
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
-  W->default_textbox = [=]{ return chess_gui->chess_terminal->terminal; };
+  W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
 
   W->shell = make_unique<Shell>(&my_app->asset, &my_app->soundasset, nullptr);
@@ -319,12 +319,10 @@ extern "C" void MyAppCreate() {
   FLAGS_console_font = "Nobile.ttf";
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
-#ifdef LFL_DEBUG
-  FLAGS_logfile = StrCat("chess.txt");
-#endif
   app = new Application();
   screen = new Window();
   my_app = new MyAppState();
+  app->name = "LChess";
   app->window_start_cb = MyWindowStart;
   app->window_init_cb = MyWindowInit;
   app->window_init_cb(screen);
