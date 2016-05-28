@@ -17,10 +17,8 @@
  */
 
 #include "core/app/app.h"
-#include "core/web/dom.h"
-#include "core/web/css.h"
-#include "core/app/flow.h"
 #include "core/app/gui.h"
+#include "core/app/ipc.h"
 #include "chess.h"
 #include "term/term.h"
 
@@ -83,10 +81,11 @@ struct ChessGUI : public GUI {
   Box win, board, term;
   Widget::Divider divider;
   Time update_time;
-  Chess::Position position;
+  Chess::Move position;
+  vector<Chess::Move> history;
   string my_name, p1_name, p2_name;
-  bool move_capture = 0, flip_board = 0, console_animating = 0 ;
-  int move_square_from = -1, move_square_to = -1, game_number = 0, p1_secs = 0, p2_secs = 0;
+  bool flip_board = 0, console_animating = 0, title_changed = 0;
+  int game_number = 0, history_ind = 0, p1_secs = 0, p2_secs = 0, last_p1_secs = 0, last_p2_secs = 0;
   unique_ptr<ChessTerminalWindow> chess_terminal;
   DragTracker drag_tracker;
   pair<bool, int> dragging_piece;
@@ -114,13 +113,13 @@ struct ChessGUI : public GUI {
     chess_terminal->terminal->line_buf.cb = bind(&ChessGUI::LineCB, this, _1);
   }
 
-  void FlipBoard(const vector<string>&) { flip_board = !flip_board; app->scheduler.Wakeup(0); }
-  void UpdateAnimating() { app->scheduler.SetAnimating(console_animating); }
+  void FlipBoard(Window *w, const vector<string>&) { flip_board = !flip_board; app->scheduler.Wakeup(w); }
+  void UpdateAnimating(Window *w) { app->scheduler.SetAnimating(w, console_animating); }
   void ClosedCB() {}
 
   void ConsoleAnimatingCB() {
     console_animating = screen ? screen->console->animating : 0;
-    UpdateAnimating();
+    UpdateAnimating(screen);
   }
 
   void LoginCB(const string &s) {
@@ -148,7 +147,9 @@ struct ChessGUI : public GUI {
   }
 
   void GameStartCB() {
-    if (FLAGS_lfapp_audio) {
+    history.clear();
+    history_ind = 0;
+    if (FLAGS_enable_audio) {
       static SoundAsset *start_sound = my_app->soundasset("start");
       app->PlaySoundEffect(start_sound);
     }
@@ -160,7 +161,7 @@ struct ChessGUI : public GUI {
 
     update_time = Now();
     position.LoadByteBoard(s);
-    move_square_from = move_square_to = -1;
+    position.square_from = position.square_to = -1;
 
     vector<string> args;
     Split(StringPiece::FromRemaining(s, 8*9), isspace, NULL, &args);
@@ -173,8 +174,8 @@ struct ChessGUI : public GUI {
     p1_secs = atoi(args[15]);
     p2_secs = atoi(args[16]);
 
-    int move_number = atoi(args[17]);
-    if (move_number == 1) {
+    position.number = atoi(args[17]) - !position.move_color;
+    if (position.number == 0) {
       if      (my_name == p1_name) flip_board = 0;
       else if (my_name == p2_name) flip_board = 1;
     }
@@ -182,33 +183,42 @@ struct ChessGUI : public GUI {
     const string &move = args[18];
     if (move == "none") {}
     else if (move == "o-o") {
-      if (position.move_color) { move_square_from = Chess::e1; move_square_to = Chess::g1; }
-      else                     { move_square_from = Chess::e8; move_square_to = Chess::g8; }
+      if (position.move_color) { position.square_from = Chess::e1; position.square_to = Chess::g1; }
+      else                     { position.square_from = Chess::e8; position.square_to = Chess::g8; }
     } else if (move == "o-o-o") {
-      if (position.move_color) { move_square_from = Chess::e1; move_square_to = Chess::c1; }
-      else                     { move_square_from = Chess::e8; move_square_to = Chess::c8; }
+      if (position.move_color) { position.square_from = Chess::e1; position.square_to = Chess::c1; }
+      else                     { position.square_from = Chess::e8; position.square_to = Chess::c8; }
     } else if (move.size() < 7 || move[1] != '/' || move[4] != '-' ||
-               (move_square_from = Chess::SquareID(&move[2])) == -1 ||
-               (move_square_to   = Chess::SquareID(&move[5])) == -1) return ERROR("Unknown move ", move);
-    move_capture = args[20].find("x") != string::npos;
+               (position.square_from = Chess::SquareID(&move[2])) == -1 ||
+               (position.square_to   = Chess::SquareID(&move[5])) == -1) return ERROR("Unknown move ", move);
+    position.name = args[20];
+    position.capture = position.name.find("x") != string::npos;
 
-    if (FLAGS_lfapp_audio) {
+    history_ind = 0;
+    if (!history.size() || history.back().number != position.number ||
+        history.back().move_color != position.move_color) history.push_back(position);
+    PositionUpdatedCB();
+  }
+
+  void PositionUpdatedCB() {
+    title_changed = true;
+    if (FLAGS_enable_audio) {
       static SoundAsset *move_sound = my_app->soundasset("move"), *capture_sound = my_app->soundasset("capture");
-      app->PlaySoundEffect(move_capture ? capture_sound : move_sound);
+      app->PlaySoundEffect(position.capture ? capture_sound : move_sound);
     }
   }
   
   void GameOverCB(int game_no, const string &p1, const string &p2, const string &result) {
     game_number = 0;
     bool lose = (my_name == p1 && result == "0-1") || (my_name == p2 && result == "1-0");
-    if (FLAGS_lfapp_audio) {
+    if (FLAGS_enable_audio) {
       static SoundAsset *win_sound = my_app->soundasset("win"), *lose_sound = my_app->soundasset("lose");
       app->PlaySoundEffect(lose ? lose_sound : win_sound);
     }
   }
 
   void IllegalMoveCB() {
-    if (FLAGS_lfapp_audio) {
+    if (FLAGS_enable_audio) {
       static SoundAsset *illegal_sound = my_app->soundasset("illegal");
       app->PlaySoundEffect(illegal_sound);
     }
@@ -243,16 +253,27 @@ struct ChessGUI : public GUI {
   }
 
   int Frame(LFL::Window *W, unsigned clicks, int flag) {
+    chess_terminal->ReadAndUpdateTerminalFramebuffer();
+
     Time now = Now();
-    if (game_number) {
-      int secs = ToSeconds(now - update_time).count();
-      int p1_s = p1_secs - (position.move_color ? 0 : secs), p2_s = p2_secs - (position.move_color ? secs : 0);
-      W->SetCaption(StringPrintf("%s %d:%02d vs %s %d:%02d",
-                                 p1_name.c_str(), p1_s/60, p1_s%60,
-                                 p2_name.c_str(), p2_s/60, p2_s%60));
+    if (game_number || title_changed) {
+      if (game_number) {
+        int secs = position.number ? ToSeconds(now - update_time).count() : 0;
+        last_p1_secs = p1_secs - (position.move_color ? 0 : secs);
+        last_p2_secs = p2_secs - (position.move_color ? secs : 0);
+      }
+      string title = StringPrintf("%s %d:%02d vs %s %d:%02d",
+                                 p1_name.c_str(), last_p1_secs/60, last_p1_secs%60,
+                                 p2_name.c_str(), last_p2_secs/60, last_p2_secs%60);
+      if (position.number)
+        StringAppendf(&title, ": %d%s: %s",
+                      position.number, position.move_color ? "" : "...",
+                      position.name.c_str());
+
+      W->SetCaption(title);
+      title_changed = false;
     }
 
-    chess_terminal->ReadAndUpdateTerminalFramebuffer();
     if (divider.changed) Layout();
     Draw();
 
@@ -264,9 +285,9 @@ struct ChessGUI : public GUI {
       Bit::Indices(position.black[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(black_font_index[i],   SquareCoords(*b));
     }
 
-    if (move_square_from != -1 && move_square_to != -1) {
-      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(SquareCoords(move_square_from));
-      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(SquareCoords(move_square_to));
+    if (position.square_from != -1 && position.square_to != -1) {
+      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(SquareCoords(position.square_from));
+      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(SquareCoords(position.square_to));
       W->gd->SetColor(Color::white);
     }
 
@@ -282,6 +303,14 @@ struct ChessGUI : public GUI {
 
     W->DrawDialogs();
     return 0;
+  }
+
+  void WalkHistory(bool backwards) {
+    if (!history.size()) return;
+    if (backwards) history_ind = min<int>(history.size() - 1, history_ind + 1);
+    else           history_ind = max<int>(0,                  history_ind - 1);
+    position = history[history.size()-1-history_ind];
+    PositionUpdatedCB();
   }
 };
 
@@ -301,25 +330,27 @@ void MyWindowStart(Window *W) {
   if (FLAGS_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
 
   W->shell = make_unique<Shell>(&my_app->asset, &my_app->soundasset, nullptr);
-  W->shell->Add("flip", bind(&ChessGUI::FlipBoard, chess_gui, _1));
+  W->shell->Add("flip", bind(&ChessGUI::FlipBoard, chess_gui, W, _1));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
-  binds->Add(Key::Escape,                   Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
-  binds->Add('6',       Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, W->shell.get(), vector<string>())));
-  binds->Add(Key::Up,   Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollUp();   app->scheduler.Wakeup(0); })));
-  binds->Add(Key::Down, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(0); })));
+  binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
+  binds->Add('6',        Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, W->shell.get(), vector<string>())));
+  binds->Add(Key::Up,    Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollUp();   app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Down,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Left,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->WalkHistory(1); app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Right, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->WalkHistory(0); app->scheduler.Wakeup(W); })));
 }
 
 }; // namespace LFL
 using namespace LFL;
 
-extern "C" void MyAppCreate() {
-  FLAGS_lfapp_video = FLAGS_lfapp_audio = FLAGS_lfapp_input = FLAGS_lfapp_network = FLAGS_console = 1;
-  FLAGS_default_font_flag = FLAGS_console_font_flag = 0;
+extern "C" void MyAppCreate(int argc, const char* const* argv) {
+  FLAGS_enable_video = FLAGS_enable_audio = FLAGS_enable_input = FLAGS_enable_network = FLAGS_console = 1;
+  FLAGS_font_flag = FLAGS_console_font_flag = 0;
   FLAGS_console_font = "Nobile.ttf";
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
-  app = new Application();
+  app = new Application(argc, argv);
   screen = new Window();
   my_app = new MyAppState();
   app->name = "LChess";
@@ -329,13 +360,13 @@ extern "C" void MyAppCreate() {
   app->exit_cb = [](){ delete my_app; };
 }
 
-extern "C" int MyAppMain(int argc, const char* const* argv) {
-  if (app->Create(argc, argv, __FILE__)) return -1;
+extern "C" int MyAppMain() {
+  if (app->Create(__FILE__)) return -1;
   if (app->Init()) return -1;
 
   app->fonts->atlas_engine.get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
-  app->scheduler.AddWaitForeverKeyboard();
-  app->scheduler.AddWaitForeverMouse();
+  app->scheduler.AddWaitForeverKeyboard(screen);
+  app->scheduler.AddWaitForeverMouse(screen);
   app->StartNewWindow(screen);
 
   // my_app->asset.Add(name, texture,     scale, translate, rotate, geometry, hull,    0, 0);
@@ -352,7 +383,9 @@ extern "C" int MyAppMain(int argc, const char* const* argv) {
   my_app->soundasset.Load();
 
   vector<MenuItem> file_menu{ MenuItem{ "q", "Quit LChess", "quit" } };
-  vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" } };
+  vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" },
+    MenuItem{ "<left>", "Previous move", ""}, MenuItem{ "<right>", "Next move", ""},
+    MenuItem{ "<up>", "Scroll up", ""}, MenuItem{ "<down>", "Scroll down", ""} };
   app->AddNativeMenu("LChess", file_menu);
   app->AddNativeEditMenu(vector<MenuItem>());
   app->AddNativeMenu("View", view_menu);

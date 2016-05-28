@@ -174,6 +174,13 @@ struct Position {
   }
 };
 
+struct Move : public Position {
+  int number = 0, square_from = -1, square_to = -1;
+  bool capture = 0;
+  string name;
+  using Position::Position;
+};
+
 }; // namespace Chess
 }; // namespace LFL
 #include "magic.h"
