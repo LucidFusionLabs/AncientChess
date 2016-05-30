@@ -132,6 +132,7 @@ struct Position {
   Position(const char *b) { LoadByteBoard(b); }
   Position() { Reset(); }
 
+  void Assign(const Position &p) { *this = p; }
   void Reset() {
     move_color = 0;
     for (int i=PAWN; i<=KING; i++) white[i] = white_initial[i];

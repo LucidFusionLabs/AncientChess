@@ -33,16 +33,31 @@ struct MyAppState {
 } *my_app;
 
 struct ChessTerminal : public Terminal {
+  using Terminal::Terminal;
+  virtual void MakeMove(Terminal::Controller*, const string&) = 0;
+  virtual void SetGameCallbacks(const StringCB &line_cb, const StringCB &update_cb) = 0;
+};
+
+struct FICSTerminal : public ChessTerminal {
   string prompt = "fics%", filter_prompt = StrCat("\n\r", prompt, " ");
   UnbackedTextBox local_cmd;
   NextRecordDispatcher line_buf;
   AhoCorasickFSM<char> move_fsm;
   StringMatcher<char> move_matcher;
 
-  ChessTerminal(ByteSink *O, GraphicsDevice *D, const FontRef &F, const point &dim) :
-    Terminal(O, D, F, dim), local_cmd(F), move_fsm({"\r<12> "}),
+  FICSTerminal(ByteSink *O, GraphicsDevice *D, const FontRef &F, const point &dim) :
+    ChessTerminal(O, D, F, dim), local_cmd(F), move_fsm({"\r<12> "}),
     move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
+  }
+
+  virtual void MakeMove(Terminal::Controller *controller, const string &move) {
+    controller->Write(StrCat(move, "\n"));
+  }
+
+  virtual void SetGameCallbacks(const StringCB &line_cb, const StringCB &update_cb) {
+    line_buf.cb = line_cb;
+    move_matcher.match_cb = update_cb;
   }
 
   virtual void Input(char k) { local_cmd.Input(k); Terminal::Write(StringPiece(&k, 1)); }
@@ -83,8 +98,9 @@ struct ChessGUI : public GUI {
   Time update_time;
   Chess::Move position;
   vector<Chess::Move> history;
+  deque<Chess::Move> premove;
   string my_name, p1_name, p2_name;
-  bool flip_board = 0, console_animating = 0, title_changed = 0;
+  bool my_color = 0, flip_board = 0, console_animating = 0, title_changed = 0;
   int game_number = 0, history_ind = 0, p1_secs = 0, p2_secs = 0, last_p1_secs = 0, last_p2_secs = 0;
   unique_ptr<ChessTerminalWindow> chess_terminal;
   DragTracker drag_tracker;
@@ -109,8 +125,8 @@ struct ChessGUI : public GUI {
     c->frame_on_keyboard_input = true;
     chess_terminal->ChangeController(move(c));
     chess_terminal->terminal->SetColors(Singleton<Terminal::StandardVGAColors>::Get());
-    chess_terminal->terminal->move_matcher.match_cb = bind(&ChessGUI::GameUpdateCB, this, _1);
-    chess_terminal->terminal->line_buf.cb = bind(&ChessGUI::LineCB, this, _1);
+    chess_terminal->terminal->SetGameCallbacks(bind(&ChessGUI::FICSLineCB, this, _1),
+                                               bind(&ChessGUI::FICSGameUpdateCB, this, _1));
   }
 
   void FlipBoard(Window *w, const vector<string>&) { flip_board = !flip_board; app->scheduler.Wakeup(w); }
@@ -122,15 +138,15 @@ struct ChessGUI : public GUI {
     UpdateAnimating(screen);
   }
 
-  void LoginCB(const string &s) {
+  void FICSLoginCB(const string &s) {
     my_name = s.substr(0, s.find("("));
     chess_terminal->controller->Write("\nset seek 0\nset style 12\n");
     screen->SetCaption(StrCat(my_name, " @ ", FLAGS_connect));
   }
 
-  void LineCB(const string &l) {
+  void FICSLineCB(const string &l) {
     static const string login_prefix = "\r**** Starting FICS session as ", game_prefix = "\r{Game ";
-    if (PrefixMatch(l, login_prefix)) LoginCB(StringWordIter(l.substr(login_prefix.size())).NextString());
+    if (PrefixMatch(l, login_prefix)) FICSLoginCB(StringWordIter(l.substr(login_prefix.size())).NextString());
     else if (PrefixMatch(l, "\rIllegal move ") || PrefixMatch(l, "\rYou are not playing ") ||
              PrefixMatch(l, "\rIt is not your move")) IllegalMoveCB();
     else if (PrefixMatch(l, game_prefix)) {
@@ -146,16 +162,7 @@ struct ChessGUI : public GUI {
     }
   }
 
-  void GameStartCB() {
-    history.clear();
-    history_ind = 0;
-    if (FLAGS_enable_audio) {
-      static SoundAsset *start_sound = my_app->soundasset("start");
-      app->PlaySoundEffect(start_sound);
-    }
-  }
-
-  void GameUpdateCB(const string &s) {
+  void FICSGameUpdateCB(const string &s) {
     if (s.size() < 8*9) return;
     if (FLAGS_print_board_updates) INFO("GameUpdateCB: ", s.substr(8*9));
 
@@ -176,8 +183,9 @@ struct ChessGUI : public GUI {
 
     position.number = atoi(args[17]) - !position.move_color;
     if (position.number == 0) {
-      if      (my_name == p1_name) flip_board = 0;
-      else if (my_name == p2_name) flip_board = 1;
+      if      (my_name == p1_name) my_color = Chess::WHITE;
+      else if (my_name == p2_name) my_color = Chess::BLACK;
+      flip_board = my_color == Chess::BLACK;
     }
 
     const string &move = args[18];
@@ -197,7 +205,24 @@ struct ChessGUI : public GUI {
     history_ind = 0;
     if (!history.size() || history.back().number != position.number ||
         history.back().move_color != position.move_color) history.push_back(position);
+
+    ReapplyPremoves();
+    if (position.move_color == my_color && premove.size()) {
+      Chess::Move pm = PopFront(premove);
+      chess_terminal->terminal->MakeMove(chess_terminal->controller.get(), pm.name);
+    }
+
     PositionUpdatedCB();
+  }
+
+  void GameStartCB() {
+    history.clear();
+    premove.clear();
+    history_ind = 0;
+    if (FLAGS_enable_audio) {
+      static SoundAsset *start_sound = my_app->soundasset("start");
+      app->PlaySoundEffect(start_sound);
+    }
   }
 
   void PositionUpdatedCB() {
@@ -233,9 +258,17 @@ struct ChessGUI : public GUI {
     if (!dragging_piece.second || down) return;
     position.SetSquare(square, dragging_piece);
     int start_square = SquareFromCoords(drag_tracker.beg_click);
+    if (start_square == square) return;
     string move = StrCat(Chess::PieceChar(dragging_piece.second),
                          Chess::SquareName(start_square), Chess::SquareName(square));
-    chess_terminal->controller->Write(StrCat(move, "\n"));
+    if (position.move_color == my_color)
+      chess_terminal->terminal->MakeMove(chess_terminal->controller.get(), move);
+    else {
+      auto &pm = PushBack(premove, position);
+      pm.name = move;
+      pm.square_from = start_square;
+      pm.square_to = square;
+    }
   }
 
   void Layout() {
@@ -288,8 +321,13 @@ struct ChessGUI : public GUI {
     if (position.square_from != -1 && position.square_to != -1) {
       W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(SquareCoords(position.square_from));
       W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(SquareCoords(position.square_to));
-      W->gd->SetColor(Color::white);
     }
+
+    for (auto &pm : premove) {
+      W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(SquareCoords(pm.square_from));
+      W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(SquareCoords(pm.square_to));
+    }
+    W->gd->SetColor(Color::white);
 
     if (drag_tracker.changing && dragging_piece.second) {
       int glyph_index = black_font_index[dragging_piece.second] + 6*(!dragging_piece.first);
@@ -310,7 +348,35 @@ struct ChessGUI : public GUI {
     if (backwards) history_ind = min<int>(history.size() - 1, history_ind + 1);
     else           history_ind = max<int>(0,                  history_ind - 1);
     position = history[history.size()-1-history_ind];
+    if (!history_ind) ReapplyPremoves();
     PositionUpdatedCB();
+  }
+
+  void ReapplyPremoves() {
+    for (auto &pm : premove) {
+      auto pm_piece = position.ClearSquare(pm.square_from);
+      position.SetSquare(pm.square_to, pm_piece);
+      pm.Assign(position);
+    }
+  }
+
+  void UndoPremove(Window *W) {
+    history_ind = 0;
+    if (premove.size()) premove.pop_back();
+    if (!premove.size() && !history.size()) return;
+    position = premove.size() ? premove.back() : history.back();
+    PositionUpdatedCB();
+    app->scheduler.Wakeup(W);
+  }
+
+  void CopyPGNToClipboard() {
+    string text = StrCat("[Site ", FLAGS_connect.substr(0, FLAGS_connect.find(":")), "]\n[Date: ",
+                         logfileday(Now()), "\n[White \"", p1_name, "\"]\n[Black \"", p2_name, "\"]\n\n");
+    if (history.size())
+      for (auto b = history.begin()+1, e = history.end(), i = b; i != e; ++i)
+        StrAppend(&text, ((i - b) % 2) ? "" : StrCat((i-b)/2+1, ". "), i->name, " ");
+    StrAppend(&text, "\n");
+    app->SetClipboardText(text);
   }
 };
 
@@ -323,14 +389,16 @@ void MyWindowInit(Window *W) {
 void MyWindowStart(Window *W) {
   ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>());
   chess_gui->chess_terminal = make_unique<ChessTerminalWindow>
-    (W->AddGUI(make_unique<ChessTerminal>(nullptr, W->gd, W->default_font, chess_gui->term_dim)));
+    (W->AddGUI(make_unique<FICSTerminal>(nullptr, W->gd, W->default_font, chess_gui->term_dim)));
 
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
   W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
 
   W->shell = make_unique<Shell>(&my_app->asset, &my_app->soundasset, nullptr);
-  W->shell->Add("flip", bind(&ChessGUI::FlipBoard, chess_gui, W, _1));
+  W->shell->Add("flip",        bind(&ChessGUI::FlipBoard, chess_gui, W, _1));
+  W->shell->Add("undopremove", bind(&ChessGUI::UndoPremove, chess_gui, W));
+  W->shell->Add("copypgn",     bind(&ChessGUI::CopyPGNToClipboard, chess_gui));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
@@ -384,10 +452,12 @@ extern "C" int MyAppMain() {
 
   vector<MenuItem> file_menu{ MenuItem{ "q", "Quit LChess", "quit" } };
   vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" },
-    MenuItem{ "<left>", "Previous move", ""}, MenuItem{ "<right>", "Next move", ""},
-    MenuItem{ "<up>", "Scroll up", ""}, MenuItem{ "<down>", "Scroll down", ""} };
+    MenuItem{ "<left>", "Previous move", "" }, MenuItem{ "<right>", "Next move", "" },
+    MenuItem{ "<up>", "Scroll up", "" }, MenuItem{ "<down>", "Scroll down", "" }, };
+  vector<MenuItem> edit_menu{ MenuItem{ "u", "Undo pre-move", "undopremove" },
+    MenuItem{ "", "Copy PGN to clipboard", "copypgn" } };
   app->AddNativeMenu("LChess", file_menu);
-  app->AddNativeEditMenu(vector<MenuItem>());
+  app->AddNativeEditMenu(edit_menu);
   app->AddNativeMenu("View", view_menu);
 
   screen->GetGUI<ChessGUI>(0)->Open(FLAGS_connect);
