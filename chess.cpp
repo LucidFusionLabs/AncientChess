@@ -91,6 +91,7 @@ struct FICSTerminal : public ChessTerminal {
 typedef TerminalWindowT<ChessTerminal> ChessTerminalWindow;
 
 struct ChessGUI : public GUI {
+  unique_ptr<ChessTerminalWindow> chess_terminal;
   point term_dim=my_app->initial_term_dim;
   v2 square_dim;
   Box win, board, term;
@@ -100,11 +101,12 @@ struct ChessGUI : public GUI {
   vector<Chess::Move> history;
   deque<Chess::Move> premove;
   string my_name, p1_name, p2_name;
-  bool my_color = 0, flip_board = 0, console_animating = 0, title_changed = 0;
+  bool my_color = 0, flip_board = 0, title_changed = 0, console_animating = 0;
   int game_number = 0, history_ind = 0, p1_secs = 0, p2_secs = 0, last_p1_secs = 0, last_p2_secs = 0;
-  unique_ptr<ChessTerminalWindow> chess_terminal;
+  int move_animate_from = -1, move_animate_to = -1;
+  Time move_animation_start, move_animation_time = Time(200);
+  pair<bool, int> dragging_piece, animating_piece;
   DragTracker drag_tracker;
-  pair<bool, int> dragging_piece;
   ChessGUI() : divider(this, true, term_dim.y * Fonts::InitFontHeight()) {}
 
   Box SquareCoords(int p) const {
@@ -130,7 +132,7 @@ struct ChessGUI : public GUI {
   }
 
   void FlipBoard(Window *w, const vector<string>&) { flip_board = !flip_board; app->scheduler.Wakeup(w); }
-  void UpdateAnimating(Window *w) { app->scheduler.SetAnimating(w, console_animating); }
+  void UpdateAnimating(Window *w) { app->scheduler.SetAnimating(w, (move_animate_from != -1) | console_animating); }
   void ClosedCB() {}
 
   void ConsoleAnimatingCB() {
@@ -203,16 +205,19 @@ struct ChessGUI : public GUI {
     position.capture = position.name.find("x") != string::npos;
 
     history_ind = 0;
-    if (!history.size() || history.back().number != position.number ||
-        history.back().move_color != position.move_color) history.push_back(position);
+    bool new_move = !history.size() || history.back().number != position.number ||
+      history.back().move_color != position.move_color;
+    if (new_move) history.push_back(position);
 
     ReapplyPremoves();
-    if (position.move_color == my_color && premove.size()) {
+    bool my_move_now = position.move_color == my_color;
+    if (my_move_now && premove.size()) {
       Chess::Move pm = PopFront(premove);
       chess_terminal->terminal->MakeMove(chess_terminal->controller.get(), pm.name);
     }
 
-    PositionUpdatedCB();
+    if (new_move && my_move_now) PositionUpdatedCB(position.square_from, position.square_to);
+    else                         PositionUpdatedCB();
   }
 
   void GameStartCB() {
@@ -225,12 +230,18 @@ struct ChessGUI : public GUI {
     }
   }
 
-  void PositionUpdatedCB() {
+  void PositionUpdatedCB(int animate_from = -1, int animate_to = -1) {
     title_changed = true;
     if (FLAGS_enable_audio) {
       static SoundAsset *move_sound = my_app->soundasset("move"), *capture_sound = my_app->soundasset("capture");
       app->PlaySoundEffect(position.capture ? capture_sound : move_sound);
     }
+    if (animate_from != -1 && animate_to != -1 && (animating_piece = position.ClearSquare(animate_to)).second) {
+      move_animate_from = animate_from;
+      move_animate_to = animate_to;
+      move_animation_start = Now();
+    } else move_animate_from = -1;
+    UpdateAnimating(screen);
   }
   
   void GameOverCB(int game_no, const string &p1, const string &p2, const string &result) {
@@ -335,6 +346,20 @@ struct ChessGUI : public GUI {
       pieces->DrawGlyph(glyph_index, SquareCoords(start_square) + (drag_tracker.end_click - drag_tracker.beg_click));
     }
 
+    if (move_animate_from != -1) {
+      if (move_animation_start + move_animation_time < now) {
+        position.SetSquare(move_animate_to, animating_piece);
+        move_animate_from = -1;
+        UpdateAnimating(W);
+      } 
+      int glyph_index = black_font_index[animating_piece.second] + 6*(!animating_piece.first);
+      Box start_square = SquareCoords(move_animate_from), end_square = SquareCoords(move_animate_to);
+      float percent = min(1.0f, float((now - move_animation_start).count()) / move_animation_time.count());
+      point slope(end_square.centerX() - start_square.centerX(), end_square.centerY() - start_square.centerY());
+      point pos = start_square.center() + slope * percent;
+      pieces->DrawGlyph(glyph_index, Box(pos.x - start_square.w/2, pos.y - start_square.h/2, start_square.w, start_square.h));
+    }
+
     W->gd->DisableBlend();
     chess_terminal->terminal->Draw(term);
     if (divider.changing) BoxOutline().Draw(Box::DelBorder(term, Border(1,1,1,1)));
@@ -345,11 +370,18 @@ struct ChessGUI : public GUI {
 
   void WalkHistory(bool backwards) {
     if (!history.size()) return;
+    int last_history_ind = history_ind, ind;
     if (backwards) history_ind = min<int>(history.size() - 1, history_ind + 1);
     else           history_ind = max<int>(0,                  history_ind - 1);
+    if (history_ind == last_history_ind) return;
     position = history[history.size()-1-history_ind];
     if (!history_ind) ReapplyPremoves();
-    PositionUpdatedCB();
+
+    if (!backwards) PositionUpdatedCB(position.square_from, position.square_to);
+    else if (Clamp<int>(last_history_ind, 0, history.size()-1) == last_history_ind) {
+      auto &last_position = history[history.size()-1-last_history_ind];
+      PositionUpdatedCB(last_position.square_to, last_position.square_from);
+    }
   }
 
   void ReapplyPremoves() {
