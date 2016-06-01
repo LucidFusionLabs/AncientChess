@@ -182,6 +182,18 @@ struct Move : public Position {
   using Position::Position;
 };
 
+struct Game {
+  string p1_name, p2_name;
+  Move position;
+  vector<Move> history;
+  deque<Move> premove;
+  bool active = 1, my_color = 0, flip_board = 0;
+  int game_number = 0, history_ind = 0, p1_secs = 0, p2_secs = 0, last_p1_secs = 0, last_p2_secs = 0;
+  int move_animate_from = -1, move_animate_to = -1;
+  Time update_time, move_animation_start;
+  pair<bool, int> moving_piece, animating_piece;
+};
+
 }; // namespace Chess
 }; // namespace LFL
 #include "magic.h"
@@ -221,7 +233,23 @@ static BitBoard KingMoves(const Position &in, int p, bool black) {
 static bool InCheck(const Position &in, bool color) {
   return in.Moves(!color)[ALL] & in.Pieces(color)[KING];
 }
-
 }; // namespace Chess
+
+#ifdef LFL_CORE_APP_GUI_H__
+struct ChessTerminal : public Terminal {
+  Terminal::Controller *controller=0;
+  function<Chess::Game*(int)> get_game_cb;
+
+  StringCB login_cb;
+  Callback illegal_move_cb;
+  function<void(int)> game_start_cb;
+  function<void(int, const string&, const string&, const string&)> game_over_cb;
+  function<void(Chess::Game*, bool, int, int)> game_update_cb;
+
+  using Terminal::Terminal;
+  virtual void MakeMove(const string&) = 0;
+};
+#endif // LFL_CORE_APP_GUI_H__
+
 }; // namespace LFL
-#endif // #define LFL_CHESS_CHESS_H__
+#endif // LFL_CHESS_CHESS_H__
