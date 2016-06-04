@@ -51,6 +51,8 @@ static const char initial_byte_board[] =
 //                                      { 0, pawns,         knights,     bishops,     rooks,       queen,       king       };
 static const BitBoard white_initial[] = { 0, 0xff00ULL,     0x42ULL,     0x24ULL,     0x81ULL,     0x10ULL,     0x8ULL     };
 static const BitBoard black_initial[] = { 0, 0xff00ULL<<40, 0x42ULL<<56, 0x24ULL<<56, 0x81ULL<<56, 0x10ULL<<56, 0x8ULL<<56 };
+static const BitBoard black_castle_path = 0x600000000000000LL, black_castle_long_path = 0x7000000000000000LL;
+static const BitBoard white_castle_path = 0x6LL,               white_castle_long_path = 0x70LL;
 
 static const char *ColorName(int n) {
   static const char *name[] = { "white", "black" };
@@ -80,6 +82,7 @@ static const char ByteBoardPieceSymbol(int n, bool color) {
 static int SquareX(int s) { return 7 - (s % 8); }
 static int SquareY(int s) { return s / 8; }
 static int SquareFromXY(int x, int y) { return (x<0 || y<0 || x>7 || y>7) ? -1 : (y*8 + (7-x)); }
+static BitBoard SquareMask(int s) { return 1LL << s; }
 
 static int SquareID(const char *s) {
   if (s[0] < 'a' || s[0] > 'h' || s[1] < '1' || s[1] > '8') return -1;
@@ -100,6 +103,15 @@ static const char *SquareName(int s) {
   CHECK_RANGE(s, 0, 64);
   return name[s];
 };
+
+string SquareMaskString(int s) {
+  string ret;
+  for (int i=7; i>=0; i--) {
+    for (int j=0; j<8; j++) StrAppend(&ret, SquareY(s) == i && SquareX(s) == j);
+    StrAppend(&ret, "\n");
+  }
+  return ret;
+}
 
 string BitBoardToString(BitBoard b) {
   string ret;
@@ -127,7 +139,8 @@ BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
 }
 
 struct Position {
-  bool move_color=WHITE;
+  bool move_color=WHITE, w_cant_castle=0, b_cant_castle=0, w_cant_castle_long=0, b_cant_castle_long=0;
+  uint8_t previous_move_was_double_step_pawn_advance=0, fifty_move_rule_count=0;
   BitBoard white[7], black[7], white_moves[7], black_moves[7];
   Position(const char *b) { LoadByteBoard(b); }
   Position() { Reset(); }
@@ -148,23 +161,29 @@ struct Position {
     SetAll(BLACK);
   }
 
+  BitBoard AllPieces() const { return white[ALL] | black[ALL]; }
+  const BitBoard *Pieces(bool color) const { return color ? black       : white;       }
+  const BitBoard *Moves (bool color) const { return color ? black_moves : white_moves; }
+  /**/  BitBoard *Pieces(bool color)       { return color ? black       : white;       }
+  /**/  BitBoard *Moves (bool color)       { return color ? black_moves : white_moves; }
+
   void SetAll(bool color) {
     BitBoard *pieces = Pieces(color);
     pieces[ALL] = pieces[PAWN] | pieces[KNIGHT] | pieces[BISHOP] | pieces[ROOK] | pieces[QUEEN] | pieces[KING];
   }
-
-  BitBoard AllPieces() const { return white[ALL] | black[ALL]; }
-
-  /**/  BitBoard *Pieces(bool color)       { return color ? black       : white;       }
-  /**/  BitBoard *Moves (bool color)       { return color ? black_moves : white_moves; }
-  const BitBoard *Pieces(bool color) const { return color ? black       : white;       }
-  const BitBoard *Moves (bool color) const { return color ? black_moves : white_moves; }
 
   void SetSquare(int s, const pair<bool,int> &p) {
     BitBoard mask = (static_cast<BitBoard>(1) << s);
     CHECK_RANGE(p.second, 1, 7);
     if (p.first) { black[p.second] |= mask; black[0] |= mask; }
     else         { white[p.second] |= mask; white[0] |= mask; }
+  }
+
+  pair<bool,int> GetSquare(int s) const {
+    BitBoard mask = (static_cast<BitBoard>(1) << s);
+    for (int i=1; i<7; i++) if (white[i] & mask) return make_pair(0, i);
+    for (int i=1; i<7; i++) if (black[i] & mask) return make_pair(1, i);
+    return make_pair(false, 0);
   }
 
   pair<bool,int> ClearSquare(int s) {
@@ -192,6 +211,26 @@ struct Game {
   int move_animate_from = -1, move_animate_to = -1;
   Time update_time, move_animation_start;
   pair<bool, int> moving_piece, animating_piece;
+
+  void Reset() { *this = Game(); }
+  void HandleNewMove() {
+    auto piece = position.GetSquare(position.square_to);
+    CHECK(piece.second);
+    if (piece.second == PAWN && abs(SquareY(position.square_to) - SquareY(position.square_from)) == 2)
+      position.previous_move_was_double_step_pawn_advance = position.square_from;
+    if (piece.first == WHITE) {
+      if      (position.square_from == e1) position.w_cant_castle = position.w_cant_castle_long = true;
+      else if (position.square_from == h1) position.w_cant_castle = true;
+      else if (position.square_from == a1) position.w_cant_castle_long = true;
+    } else {
+      if      (position.square_from == e8) position.b_cant_castle = position.b_cant_castle_long = true;
+      else if (position.square_from == h8) position.b_cant_castle = true;
+      else if (position.square_from == a8) position.b_cant_castle_long = true;
+    }
+    if (position.capture || piece.second == PAWN) position.fifty_move_rule_count = 0;
+    else                                          position.fifty_move_rule_count++;
+    history.push_back(position);
+  }
 };
 
 }; // namespace Chess
@@ -201,8 +240,8 @@ namespace LFL {
 namespace Chess {
 
 static BitBoard PawnMoves(const Position &in, int p, bool black) {
-  return 0;
-  // return pawn_occupancy_mask[p] & ~in.Pieces(black)[ALL] | pawn_attack_mask[p] & in.Pieces(!black)[ALL];
+  if (black) return (black_pawn_occupancy_mask[p] & ~in.AllPieces()) | (black_pawn_attack_mask[p] & in.Pieces(!black)[ALL]);
+  else       return (white_pawn_occupancy_mask[p] & ~in.AllPieces()) | (white_pawn_attack_mask[p] & in.Pieces(!black)[ALL]);
 }
 
 static BitBoard KnightMoves(const Position &in, int p, bool black) {
@@ -227,12 +266,31 @@ static BitBoard QueenMoves(const Position &in, int p, bool black) {
 }
 
 static BitBoard KingMoves(const Position &in, int p, bool black) {
-  return king_occupancy_mask[p] & ~in.Pieces(black)[ALL];
+  BitBoard ret = king_occupancy_mask[p] & ~in.Pieces(black)[ALL];
+  if (black) {
+    if (!in.b_cant_castle      && !(in.AllPieces() & black_castle_path))      ret |= SquareMask(g8); 
+    if (!in.b_cant_castle_long && !(in.AllPieces() & black_castle_long_path)) ret |= SquareMask(c8); 
+  } else {
+    if (!in.w_cant_castle      && !(in.AllPieces() & white_castle_path))      ret |= SquareMask(g1); 
+    if (!in.w_cant_castle_long && !(in.AllPieces() & white_castle_long_path)) ret |= SquareMask(c1); 
+  }
+  return ret;
+}
+
+static BitBoard PieceMoves(const Position &in, int piece, int square, bool black) {
+  if      (piece == PAWN)   return PawnMoves  (in, square, black);
+  else if (piece == KNIGHT) return KnightMoves(in, square, black);
+  else if (piece == BISHOP) return BishopMoves(in, square, black);
+  else if (piece == ROOK)   return RookMoves  (in, square, black);
+  else if (piece == QUEEN)  return QueenMoves (in, square, black);
+  else if (piece == KING)   return KingMoves  (in, square, black);
+  else                      FATAL("unknown piece ", piece);
 }
 
 static bool InCheck(const Position &in, bool color) {
   return in.Moves(!color)[ALL] & in.Pieces(color)[KING];
 }
+
 }; // namespace Chess
 
 #ifdef LFL_CORE_APP_GUI_H__

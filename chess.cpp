@@ -24,8 +24,8 @@
 #include "term/term.h"
 
 namespace LFL {
-DEFINE_string(connect, "freechess.org:5000", "Connect to server");
-DEFINE_bool(click_or_drag_pieces, false, "Move by clicking or dragging");
+DEFINE_string(connect, "", "freechess.org:5000", "Connect to server");
+DEFINE_bool(click_or_drag_pieces, MOBILE, "Move by clicking or dragging");
 DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game starts");
 
 struct MyAppState {
@@ -48,7 +48,8 @@ struct ChessGUI : public GUI {
   bool title_changed = 0, console_animating = 0;
   Time move_animation_time = Time(200);
   DragTracker drag_tracker;
-  ChessGUI() : divider(this, true, term_dim.y * Fonts::InitFontHeight()) {}
+  ChessGUI() :
+    divider(this, true, term_dim.y * Fonts::InitFontHeight()) { (top_game = &game_map[0])->active = 0; }
 
   /**/  Chess::Game *Top()       { return top_game; }
   const Chess::Game *Top() const { return top_game; }
@@ -66,6 +67,7 @@ struct ChessGUI : public GUI {
 
   void Open(const string &hostport) {
     Activate();
+    INFO("connecting to ", hostport);
     auto c = make_unique<NetworkTerminalController>(app->net->tcp_client.get(), hostport,
                                                     bind(&ChessGUI::ClosedCB, this));
     c->frame_on_keyboard_input = true;
@@ -96,11 +98,8 @@ struct ChessGUI : public GUI {
 
   void GameStartCB(int game_no) {
     Chess::Game *game = top_game = &game_map[game_no];
-    game->active = true;
+    game->Reset();
     game->game_number = game_no;
-    game->premove.clear();
-    game->history.clear();
-    game->history_ind = 0;
     if (FLAGS_enable_audio) {
       static SoundAsset *start_sound = my_app->soundasset("start");
       app->PlaySoundEffect(start_sound);
@@ -148,33 +147,46 @@ struct ChessGUI : public GUI {
 
   void ClickCB(int button, int x, int y, int down) {
     Chess::Game *game = Top();
-    if (!game) return;
+    if (!game || !down) return;
     point p = point(x, y) - board.Position();
-    int square;
+    int square, start_square;
+    pair<bool, int> moved_piece;
     if ((square = SquareFromCoords(p, game->flip_board)) < 0) return;
+    if (!game->moving_piece.second) {
+      drag_tracker.beg_click = drag_tracker.end_click = p;
+      game->moving_piece = game->position.ClearSquare(square);
+      return;
+    }
+    swap(game->moving_piece, moved_piece);
+    game->position.SetSquare(square, moved_piece);
+    if ((start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board)) == square) return;
+    MakeMove(game, moved_piece.second, start_square, square);
   }
 
   void DragCB(int button, int x, int y, int down) {
     Chess::Game *game = Top();
     if (!game) return;
     point p = point(x, y) - board.Position();
-    int square;
+    int square, start_square;
+    pair<bool, int> moved_piece;
     if ((square = SquareFromCoords(p, game->flip_board)) < 0) return;
-    bool start = drag_tracker.Update(p, down);
-    if (start) game->moving_piece = game->position.ClearSquare(square);
+    if (drag_tracker.Update(p, down)) game->moving_piece = game->position.ClearSquare(square);
     if (!game->moving_piece.second || down) return;
-    game->position.SetSquare(square, game->moving_piece);
-    int start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board);
-    if (start_square == square) return;
-    string move = StrCat(Chess::PieceChar(game->moving_piece.second),
-                         Chess::SquareName(start_square), Chess::SquareName(square));
+    swap(game->moving_piece, moved_piece);
+    game->position.SetSquare(square, moved_piece);
+    if ((start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board)) == square) return;
+    MakeMove(game, moved_piece.second, start_square, square);
+  }
+
+  void MakeMove(Chess::Game *game, int piece, int start_square, int end_square) {
+    string move = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
     if (game->position.move_color == game->my_color)
       chess_terminal->terminal->MakeMove(move);
     else {
       auto &pm = PushBack(game->premove, game->position);
       pm.name = move;
       pm.square_from = start_square;
-      pm.square_to = square;
+      pm.square_to = end_square;
     }
   }
 
@@ -246,13 +258,19 @@ struct ChessGUI : public GUI {
       W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(SquareCoords(pm.square_from, game->flip_board));
       W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(SquareCoords(pm.square_to,   game->flip_board));
     }
-    W->gd->SetColor(Color::white);
 
-    if (drag_tracker.changing && game->moving_piece.second) {
-      int glyph_index = black_font_index[game->moving_piece.second] + 6*(!game->moving_piece.first);
+    if (game->moving_piece.second) {
       int start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board);
+      Chess::BitBoard moves = PieceMoves(game->position, game->moving_piece.second, start_square, game->moving_piece.first);
+      Bit::Indices(moves, bits);
+      W->gd->SetColor(Color(255, 85, 255));
+      for (int *b = bits; *b != -1; b++)   BoxOutline().Draw(SquareCoords(*b, game->flip_board));
+      W->gd->SetColor(Color(170, 0, 170)); BoxOutline().Draw(SquareCoords(start_square, game->flip_board));
+      W->gd->SetColor(Color::white);
+
+      int glyph_index = black_font_index[game->moving_piece.second] + 6*(!game->moving_piece.first);
       pieces->DrawGlyph(glyph_index, SquareCoords(start_square, game->flip_board) + (drag_tracker.end_click - drag_tracker.beg_click));
-    }
+    } else W->gd->SetColor(Color::white);
 
     if (game->move_animate_from != -1) {
       if (game->move_animation_start + move_animation_time < now) {
@@ -368,6 +386,7 @@ extern "C" void MyAppCreate(int argc, const char* const* argv) {
 }
 
 extern "C" int MyAppMain() {
+  app->SetExtraScale(true);
   if (app->Create(__FILE__)) return -1;
   if (app->Init()) return -1;
 

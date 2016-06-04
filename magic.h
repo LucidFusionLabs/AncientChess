@@ -109,9 +109,54 @@ static BitBoard king_occupancy_mask[] = {
   0x203000000000000LL, 0x507000000000000LL, 0xa0e000000000000LL, 0x141c000000000000LL, 0x2838000000000000LL, 0x5070000000000000LL, 0xa0e0000000000000LL, 0x40c0000000000000LL,
 };
 
+static BitBoard white_pawn_occupancy_mask[] = {
+  0x100LL,             0x200LL,             0x400LL,             0x800LL,             0x1000LL,             0x2000LL,             0x4000LL,             0x8000LL,
+  0x1010000LL,         0x2020000LL,         0x4040000LL,         0x8080000LL,         0x10100000LL,         0x20200000LL,         0x40400000LL,         0x80800000LL,
+  0x1000000LL,         0x2000000LL,         0x4000000LL,         0x8000000LL,         0x10000000LL,         0x20000000LL,         0x40000000LL,         0x80000000LL,
+  0x100000000LL,       0x200000000LL,       0x400000000LL,       0x800000000LL,       0x1000000000LL,       0x2000000000LL,       0x4000000000LL,       0x8000000000LL,
+  0x10000000000LL,     0x20000000000LL,     0x40000000000LL,     0x80000000000LL,     0x100000000000LL,     0x200000000000LL,     0x400000000000LL,     0x800000000000LL,
+  0x1000000000000LL,   0x2000000000000LL,   0x4000000000000LL,   0x8000000000000LL,   0x10000000000000LL,   0x20000000000000LL,   0x40000000000000LL,   0x80000000000000LL,
+  0x100000000000000LL, 0x200000000000000LL, 0x400000000000000LL, 0x800000000000000LL, 0x1000000000000000LL, 0x2000000000000000LL, 0x4000000000000000LL, 0x8000000000000000LL,
+  0x0LL,               0x0LL,               0x0LL,               0x0LL,               0x0LL,                0x0LL,                0x0LL,                0x0LL,
+};
+
+static BitBoard white_pawn_attack_mask[] = {
+  0x200LL,             0x500LL,             0xa00LL,             0x1400LL,             0x2800LL,             0x5000LL,             0xa000LL,             0x4000LL,
+  0x20000LL,           0x50000LL,           0xa0000LL,           0x140000LL,           0x280000LL,           0x500000LL,           0xa00000LL,           0x400000LL,
+  0x2000000LL,         0x5000000LL,         0xa000000LL,         0x14000000LL,         0x28000000LL,         0x50000000LL,         0xa0000000LL,         0x40000000LL,
+  0x200000000LL,       0x500000000LL,       0xa00000000LL,       0x1400000000LL,       0x2800000000LL,       0x5000000000LL,       0xa000000000LL,       0x4000000000LL,
+  0x20000000000LL,     0x50000000000LL,     0xa0000000000LL,     0x140000000000LL,     0x280000000000LL,     0x500000000000LL,     0xa00000000000LL,     0x400000000000LL,
+  0x2000000000000LL,   0x5000000000000LL,   0xa000000000000LL,   0x14000000000000LL,   0x28000000000000LL,   0x50000000000000LL,   0xa0000000000000LL,   0x40000000000000LL,
+  0x200000000000000LL, 0x500000000000000LL, 0xa00000000000000LL, 0x1400000000000000LL, 0x2800000000000000LL, 0x5000000000000000LL, 0xa000000000000000LL, 0x4000000000000000LL,
+  0x0LL,               0x0LL,               0x0LL,               0x0LL,                0x0LL,                0x0LL,                0x0LL,                0x0LL 
+};
+
+static BitBoard black_pawn_occupancy_mask[] = {
+  0x0LL,             0x0LL,             0x0LL,             0x0LL,             0x0LL,              0x0LL,              0x0LL,              0x0LL,
+  0x1LL,             0x2LL,             0x4LL,             0x8LL,             0x10LL,             0x20LL,             0x40LL,             0x80LL,
+  0x100LL,           0x200LL,           0x400LL,           0x800LL,           0x1000LL,           0x2000LL,           0x4000LL,           0x8000LL,
+  0x10000LL,         0x20000LL,         0x40000LL,         0x80000LL,         0x100000LL,         0x200000LL,         0x400000LL,         0x800000LL,
+  0x1000000LL,       0x2000000LL,       0x4000000LL,       0x8000000LL,       0x10000000LL,       0x20000000LL,       0x40000000LL,       0x80000000LL,
+  0x100000000LL,     0x200000000LL,     0x400000000LL,     0x800000000LL,     0x1000000000LL,     0x2000000000LL,     0x4000000000LL,     0x8000000000LL,
+  0x10100000000LL,   0x20200000000LL,   0x40400000000LL,   0x80800000000LL,   0x101000000000LL,   0x202000000000LL,   0x404000000000LL,   0x808000000000LL,
+  0x1000000000000LL, 0x2000000000000LL, 0x4000000000000LL, 0x8000000000000LL, 0x10000000000000LL, 0x20000000000000LL, 0x40000000000000LL, 0x80000000000000LL
+};
+
+static BitBoard black_pawn_attack_mask[] = {
+  0x0LL,             0x0LL,             0x0LL,             0x0LL,              0x0LL,              0x0LL,              0x0LL,              0x0LL,
+  0x2LL,             0x5LL,             0xaLL,             0x14LL,             0x28LL,             0x50LL,             0xa0LL,             0x40LL,
+  0x200LL,           0x500LL,           0xa00LL,           0x1400LL,           0x2800LL,           0x5000LL,           0xa000LL,           0x4000LL,
+  0x20000LL,         0x50000LL,         0xa0000LL,         0x140000LL,         0x280000LL,         0x500000LL,         0xa00000LL,         0x400000LL,
+  0x2000000LL,       0x5000000LL,       0xa000000LL,       0x14000000LL,       0x28000000LL,       0x50000000LL,       0xa0000000LL,       0x40000000LL,
+  0x200000000LL,     0x500000000LL,     0xa00000000LL,     0x1400000000LL,     0x2800000000LL,     0x5000000000LL,     0xa000000000LL,     0x4000000000LL,
+  0x20000000000LL,   0x50000000000LL,   0xa0000000000LL,   0x140000000000LL,   0x280000000000LL,   0x500000000000LL,   0xa00000000000LL,   0x400000000000LL,
+  0x2000000000000LL, 0x5000000000000LL, 0xa000000000000LL, 0x14000000000000LL, 0x28000000000000LL, 0x50000000000000LL, 0xa0000000000000LL, 0x40000000000000LL
+};
+
 int MagicHash(BitBoard occupancy, BitBoard magic_number, int magic_number_bits) {
   return int((occupancy * magic_number) >> (64 - magic_number_bits));
 } 
+
 int MagicHash(int p, BitBoard occupancy, const BitBoard *magic_number, const int *magic_number_bits) {
   return MagicHash(occupancy, magic_number[p], magic_number_bits[p]);
 }
@@ -124,12 +169,12 @@ void GenerateRookOccupancyVariations(int p, vector<BitBoard> *occupancy_variatio
   for (int i=0; i<variation_count; i++) {
     BitBoard occupancy=0, attack=0;
     Bit::Indices(i, i_bit_indices);
-    for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1L << mask_bit_indices[i_bit_indices[j]]);
+    for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1LL << mask_bit_indices[i_bit_indices[j]]);
 
-    for (j=p+8; j<=55                    && (occupancy & (1L<<j)) == 0; j+=8) {}; if (j>=0 && j<=63) attack |= (1L<<j);
-    for (j=p-8; j>=8                     && (occupancy & (1L<<j)) == 0; j-=8) {}; if (j>=0 && j<=63) attack |= (1L<<j);
-    for (j=p+1; j%8!=7 && j%8!=0         && (occupancy & (1L<<j)) == 0; j++)  {}; if (j>=0 && j<=63) attack |= (1L<<j);
-    for (j=p-1; j%8!=7 && j%8!=0 && j>=0 && (occupancy & (1L<<j)) == 0; j--)  {}; if (j>=0 && j<=63) attack |= (1L<<j);
+    for (j=p+8; j<=55                    && (occupancy & (1LL<<j)) == 0; j+=8) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+    for (j=p-8; j>=8                     && (occupancy & (1LL<<j)) == 0; j-=8) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+    for (j=p+1; j%8!=7 && j%8!=0         && (occupancy & (1LL<<j)) == 0; j++)  {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+    for (j=p-1; j%8!=7 && j%8!=0 && j>=0 && (occupancy & (1LL<<j)) == 0; j--)  {}; if (j>=0 && j<=63) attack |= (1LL<<j);
 
     occupancy_variation->push_back(occupancy);
     if (attack_set) attack_set->push_back(attack);
@@ -144,12 +189,12 @@ void GenerateBishopOccupancyVariations(int p, vector<BitBoard> *occupancy_variat
   for (int i=0; i<variation_count; i++) {
     BitBoard occupancy=0, attack=0;
     Bit::Indices(i, i_bit_indices);
-    for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1L << mask_bit_indices[i_bit_indices[j]]);
+    for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1LL << mask_bit_indices[i_bit_indices[j]]);
 
-    for (j=p+9; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1L<<j)) == 0; j+=9) {}; if (j>=0 && j<=63) attack |= (1L<<j);
-    for (j=p-9; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1L<<j)) == 0; j-=9) {}; if (j>=0 && j<=63) attack |= (1L<<j);
-    for (j=p+7; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1L<<j)) == 0; j+=7) {}; if (j>=0 && j<=63) attack |= (1L<<j);
-    for (j=p-7; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1L<<j)) == 0; j-=7) {}; if (j>=0 && j<=63) attack |= (1L<<j);
+    for (j=p+9; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1LL<<j)) == 0; j+=9) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+    for (j=p-9; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1LL<<j)) == 0; j-=9) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+    for (j=p+7; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1LL<<j)) == 0; j+=7) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+    for (j=p-7; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1LL<<j)) == 0; j-=7) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
 
     occupancy_variation->push_back(occupancy);
     if (attack_set) attack_set->push_back(attack);
@@ -162,10 +207,10 @@ void GenerateRookMagicMoves(int p, const vector<BitBoard> &occupancy_variation, 
     int magic_index = MagicHash(p, occupancy_variation[i], rook_magic_number, rook_magic_number_bits);
     BitBoard valid_moves = 0;
 
-    for (j=p+8; j<=63;         j+=8) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
-    for (j=p-8; j>= 0;         j-=8) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
-    for (j=p+1; j%8!=0;         j++) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
-    for (j=p-1; j%8!=7 && j>=0; j--) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
+    for (j=p+8; j<=63;         j+=8) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+    for (j=p-8; j>= 0;         j-=8) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+    for (j=p+1; j%8!=0;         j++) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+    for (j=p-1; j%8!=7 && j>=0; j--) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
 
     CHECK_RANGE(magic_index, 0, magic_moves->size());
     (*magic_moves)[magic_index] = valid_moves;
@@ -178,10 +223,10 @@ void GenerateBishopMagicMoves(int p, const vector<BitBoard> &occupancy_variation
     int magic_index = MagicHash(p, occupancy_variation[i], bishop_magic_number, bishop_magic_number_bits);
     BitBoard valid_moves = 0;
 
-    for (j=p+9; j%8!=0 && j<=63; j+=9) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
-    for (j=p-9; j%8!=7 && j>= 0; j-=9) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
-    for (j=p+7; j%8!=7 && j<=63; j+=7) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
-    for (j=p-7; j%8!=0 && j>= 0; j-=7) { valid_moves |= (1L<<j); if ((occupancy_variation[i] & (1L<<j)) != 0) break; }
+    for (j=p+9; j%8!=0 && j<=63; j+=9) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+    for (j=p-9; j%8!=7 && j>= 0; j-=9) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+    for (j=p+7; j%8!=7 && j<=63; j+=7) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+    for (j=p-7; j%8!=0 && j>= 0; j-=7) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
 
     CHECK_RANGE(magic_index, 0, magic_moves->size());
     (*magic_moves)[magic_index] = valid_moves;
@@ -191,8 +236,8 @@ void GenerateBishopMagicMoves(int p, const vector<BitBoard> &occupancy_variation
 void GenerateMagicNumbers(int p, const BitBoard *occupancyMask, const vector<BitBoard> &occupancy_variation, const vector<BitBoard> &attack_set,
                           BitBoard *magic_number_out, int *magic_number_bits_out)
 {
-  int bit_count=Bit::Count(occupancyMask[p]), variation_count=int(1L << bit_count);
-  vector<BitBoard> used_by(int(1L << bit_count), 0);
+  int bit_count=Bit::Count(occupancyMask[p]), variation_count=int(1LL << bit_count);
+  vector<BitBoard> used_by(int(1LL << bit_count), 0);
   BitBoard magic_number;
 
   bool fail=0;

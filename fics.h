@@ -124,7 +124,7 @@ struct FICSTerminal : public ChessTerminal {
     game->history_ind = 0;
     bool new_move = !game->history.size() || game->history.back().number != game->position.number ||
       game->history.back().move_color != game->position.move_color;
-    if (new_move) game->history.push_back(game->position);
+    if (new_move) game->HandleNewMove();
 
     bool my_move_now = game->position.move_color == game->my_color;
     if (new_move && my_move_now) game_update_cb(game, true, game->position.square_from, game->position.square_to);
