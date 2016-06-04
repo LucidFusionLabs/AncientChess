@@ -108,7 +108,7 @@ struct FICSTerminal : public ChessTerminal {
 
     bool black = game->position.move_color;
     const string &move = args[18];
-    if (move == "none") {}
+    if (move == "none") game->position.square_from = game->position.square_to = -1;
     else if (move == "o-o") {
       if (black) { game->position.square_from = Chess::e1; game->position.square_to = Chess::g1; }
       else       { game->position.square_from = Chess::e8; game->position.square_to = Chess::g8; }

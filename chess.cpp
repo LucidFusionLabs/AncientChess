@@ -24,7 +24,7 @@
 #include "term/term.h"
 
 namespace LFL {
-DEFINE_string(connect, "", "freechess.org:5000", "Connect to server");
+DEFINE_string(connect, "freechess.org:5000", "Connect to server");
 DEFINE_bool(click_or_drag_pieces, MOBILE, "Move by clicking or dragging");
 DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game starts");
 
@@ -48,8 +48,7 @@ struct ChessGUI : public GUI {
   bool title_changed = 0, console_animating = 0;
   Time move_animation_time = Time(200);
   DragTracker drag_tracker;
-  ChessGUI() :
-    divider(this, true, term_dim.y * Fonts::InitFontHeight()) { (top_game = &game_map[0])->active = 0; }
+  ChessGUI() : divider(this, true, screen->width) { (top_game = &game_map[0])->active = 0; }
 
   /**/  Chess::Game *Top()       { return top_game; }
   const Chess::Game *Top() const { return top_game; }
@@ -190,12 +189,17 @@ struct ChessGUI : public GUI {
     }
   }
 
+  void Reshaped() { /*divider.size = screen->width;*/ }
   void Layout() {
     Reset();
     win = screen->Box();
     term.w = win.w;
     term_dim.x = win.w / Fonts::InitFontWidth();
-    divider.LayoutDivideBottom(win, &win, &term);
+    divider.max_size = win.w;
+    divider.LayoutDivideTop(win, &win, &term);
+    CHECK_LE(win.h, win.w);
+    if (int d = win.w - win.h) { win.w -= d; win.x += d/2; }
+    CHECK_EQ(win.w, win.h);
     board = Box::DelBorder(win, Border(5,5,5,5));
     square_dim = v2(board.w/8.0, board.h/8.0);
     if (FLAGS_click_or_drag_pieces) mouse.AddClickBox(board, MouseController::CoordCB(bind(&ChessGUI::ClickCB, this, _1, _2, _3, _4)));
@@ -339,7 +343,7 @@ struct ChessGUI : public GUI {
 void MyWindowInit(Window *W) {
   screen->caption = "Chess";
   screen->width = 630;
-  screen->height = 570 + my_app->initial_term_dim.y * Fonts::InitFontHeight();
+  screen->height = 630 + my_app->initial_term_dim.y * Fonts::InitFontHeight();
 }
 
 void MyWindowStart(Window *W) {
@@ -347,6 +351,7 @@ void MyWindowStart(Window *W) {
   chess_gui->chess_terminal = make_unique<ChessTerminalWindow>
     (W->AddGUI(make_unique<FICSTerminal>(nullptr, W->gd, W->default_font, chess_gui->term_dim)));
 
+  W->reshaped_cb = bind(&ChessGUI::Reshaped, chess_gui);
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
   W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
@@ -386,7 +391,10 @@ extern "C" void MyAppCreate(int argc, const char* const* argv) {
 }
 
 extern "C" int MyAppMain() {
+#ifdef LFL_MOBILE
   app->SetExtraScale(true);
+  app->SetTouchKeyboardTiled(false);
+#endif
   if (app->Create(__FILE__)) return -1;
   if (app->Init()) return -1;
 

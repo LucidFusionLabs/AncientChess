@@ -214,21 +214,23 @@ struct Game {
 
   void Reset() { *this = Game(); }
   void HandleNewMove() {
-    auto piece = position.GetSquare(position.square_to);
-    CHECK(piece.second);
-    if (piece.second == PAWN && abs(SquareY(position.square_to) - SquareY(position.square_from)) == 2)
-      position.previous_move_was_double_step_pawn_advance = position.square_from;
-    if (piece.first == WHITE) {
-      if      (position.square_from == e1) position.w_cant_castle = position.w_cant_castle_long = true;
-      else if (position.square_from == h1) position.w_cant_castle = true;
-      else if (position.square_from == a1) position.w_cant_castle_long = true;
-    } else {
-      if      (position.square_from == e8) position.b_cant_castle = position.b_cant_castle_long = true;
-      else if (position.square_from == h8) position.b_cant_castle = true;
-      else if (position.square_from == a8) position.b_cant_castle_long = true;
+    if (position.square_from != -1 && position.square_to != -1) {
+      auto piece = position.GetSquare(position.square_to);
+      CHECK(piece.second);
+      if (piece.second == PAWN && abs(SquareY(position.square_to) - SquareY(position.square_from)) == 2)
+        position.previous_move_was_double_step_pawn_advance = position.square_to;
+      if (piece.first == WHITE) {
+        if      (position.square_from == e1) position.w_cant_castle = position.w_cant_castle_long = true;
+        else if (position.square_from == h1) position.w_cant_castle = true;
+        else if (position.square_from == a1) position.w_cant_castle_long = true;
+      } else {
+        if      (position.square_from == e8) position.b_cant_castle = position.b_cant_castle_long = true;
+        else if (position.square_from == h8) position.b_cant_castle = true;
+        else if (position.square_from == a8) position.b_cant_castle_long = true;
+      }
+      if (position.capture || piece.second == PAWN) position.fifty_move_rule_count = 0;
+      else                                          position.fifty_move_rule_count++;
     }
-    if (position.capture || piece.second == PAWN) position.fifty_move_rule_count = 0;
-    else                                          position.fifty_move_rule_count++;
     history.push_back(position);
   }
 };
@@ -240,8 +242,15 @@ namespace LFL {
 namespace Chess {
 
 static BitBoard PawnMoves(const Position &in, int p, bool black) {
-  if (black) return (black_pawn_occupancy_mask[p] & ~in.AllPieces()) | (black_pawn_attack_mask[p] & in.Pieces(!black)[ALL]);
-  else       return (white_pawn_occupancy_mask[p] & ~in.AllPieces()) | (white_pawn_attack_mask[p] & in.Pieces(!black)[ALL]);
+  BitBoard ret = black
+    ? ((black_pawn_occupancy_mask[p] & ~in.AllPieces()) | (black_pawn_attack_mask[p] & in.Pieces(!black)[ALL]))
+    : ((white_pawn_occupancy_mask[p] & ~in.AllPieces()) | (white_pawn_attack_mask[p] & in.Pieces(!black)[ALL]));
+  if (in.previous_move_was_double_step_pawn_advance &&
+      SquareY(in.previous_move_was_double_step_pawn_advance) == SquareY(p)) {
+    if      (in.previous_move_was_double_step_pawn_advance + 1 == p) ret |= SquareMask(black ? p-9 : p+7);
+    else if (in.previous_move_was_double_step_pawn_advance - 1 == p) ret |= SquareMask(black ? p-7 : p+9);
+  }
+  return ret;
 }
 
 static BitBoard KnightMoves(const Position &in, int p, bool black) {
