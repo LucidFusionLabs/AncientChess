@@ -103,8 +103,8 @@ struct ChessGUI : public GUI {
       static SoundAsset *start_sound = my_app->soundasset("start");
       app->PlaySoundEffect(start_sound);
     }
-    if (FLAGS_auto_close_old_games)
-      FilterValues(&game_map, [](const pair<int, Chess::Game> &x){ return !x.second.active; });
+    if (FLAGS_auto_close_old_games) FilterValues<unordered_map<int, Chess::Game>>
+      (&game_map, [](const pair<const int, Chess::Game> &x){ return !x.second.active; });
   }
 
   void GameOverCB(int game_no, const string &p1, const string &p2, const string &result) {
@@ -189,7 +189,7 @@ struct ChessGUI : public GUI {
     }
   }
 
-  void Reshaped() { /*divider.size = screen->width;*/ }
+  void Reshaped() { divider.size = screen->width; }
   void Layout() {
     Reset();
     win = screen->Box();
@@ -376,8 +376,8 @@ using namespace LFL;
 
 extern "C" void MyAppCreate(int argc, const char* const* argv) {
   FLAGS_enable_video = FLAGS_enable_audio = FLAGS_enable_input = FLAGS_enable_network = FLAGS_console = 1;
-  FLAGS_font_flag = FLAGS_console_font_flag = 0;
   FLAGS_console_font = "Nobile.ttf";
+  FLAGS_console_font_flag = 0;
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
   app = new Application(argc, argv);
