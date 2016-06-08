@@ -205,7 +205,7 @@ struct ChessGUI : public GUI {
     if (FLAGS_click_or_drag_pieces) mouse.AddClickBox(board, MouseController::CoordCB(bind(&ChessGUI::ClickCB, this, _1, _2, _3, _4)));
     else                            mouse.AddDragBox (board, MouseController::CoordCB(bind(&ChessGUI::DragCB,  this, _1, _2, _3, _4)));
 
-    Texture *board_tex = &my_app->asset("board")->tex;
+    Texture *board_tex = &my_app->asset("board1")->tex;
     child_box.PushBack(win, Drawable::Attr(board_tex), board_tex);
   }
 
@@ -397,15 +397,33 @@ extern "C" int MyAppMain() {
   app->SetExtraScale(true);
 #endif
   if (app->Create(__FILE__)) return -1;
+#ifdef WIN32
+  app->asset_cache["default.vert"]                                    = app->LoadResource(200);
+  app->asset_cache["default.frag"]                                    = app->LoadResource(201);
+  app->asset_cache["MenuAtlas,0,255,255,255,0.0000.glyphs.matrix"]    = app->LoadResource(202);
+  app->asset_cache["MenuAtlas,0,255,255,255,0.0000.png"]              = app->LoadResource(203);
+  app->asset_cache["ChessPieces1,0,255,255,255,0.0000.glyphs.matrix"] = app->LoadResource(206);
+  app->asset_cache["ChessPieces1,0,255,255,255,0.0000.png"]           = app->LoadResource(207);
+  app->asset_cache["board1.png"]                                      = app->LoadResource(208);
+  app->asset_cache["capture.wav"]                                     = app->LoadResource(209);
+  app->asset_cache["illegal.wav"]                                     = app->LoadResource(210);
+  app->asset_cache["lose.wav"]                                        = app->LoadResource(211);
+  app->asset_cache["move.wav"]                                        = app->LoadResource(212);
+  app->asset_cache["start.wav"]                                       = app->LoadResource(213);
+  app->asset_cache["win.wav"]                                         = app->LoadResource(214);
+  if (FLAGS_console) {
+    app->asset_cache["Nobile.ttf,32,255,255,255,0.0000.glyphs.matrix"] = app->LoadResource(204);
+    app->asset_cache["Nobile.ttf,32,255,255,255,0.0000.png"]           = app->LoadResource(205);
+  }
+#endif
   if (app->Init()) return -1;
-
   app->fonts->atlas_engine.get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
   app->scheduler.AddWaitForeverKeyboard(screen);
   app->scheduler.AddWaitForeverMouse(screen);
   app->StartNewWindow(screen);
 
-  // my_app->asset.Add(name, texture,     scale, translate, rotate, geometry, hull,    0, 0);
-  my_app->asset.Add("board", "board.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
+  // my_app->asset.Add(name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
+  my_app->asset.Add("board1", "board1.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
   my_app->asset.Load();
 
   // my_app->soundasset.Add(name,   filename,      ringbuf, channels, sample_rate, seconds );

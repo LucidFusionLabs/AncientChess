@@ -1,7 +1,7 @@
 # $Id: CMakeLists.txt 1320 2014-10-26 08:12:52Z justin $
 
 lfl_project(chess)
-lfl_add_package(chess SOURCES chess.cpp
+lfl_add_package(chess SOURCES chess.cpp chess.rc
                 LINK_LIBRARIES ${LFL_APP_LIB} ${LFL_APP_FRAMEWORK} ${LFL_APP_GRAPHICS}
                 ${LFL_APP_AUDIO} app_null_camera app_null_matrix app_null_fft
                 app_simple_resampler app_simple_loader ${LFL_APP_CONVERT}
