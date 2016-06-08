@@ -31,8 +31,9 @@ struct FICSTerminal : public ChessTerminal {
     ChessTerminal(O, D, F, dim), local_cmd(F), move_fsm({"\r<12> "}),
     move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
-    line_buf.cb = bind(&FICSTerminal::FICSLineCB, this, _1),
     move_matcher.match_cb = bind(&FICSTerminal::FICSGameUpdateCB, this, _1);
+    line_buf.cb = bind(&FICSTerminal::FICSLineCB, this, _1);
+    line_fb.only_grow = cmd_fb.only_grow = true;
   }
 
   virtual void MakeMove(const string &move) { controller->Write(StrCat(move, "\n")); }

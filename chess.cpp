@@ -233,11 +233,13 @@ struct ChessGUI : public GUI {
     }
 
     if (divider.changed) Layout();
+    if (win.w != screen->width)
+    { ScopedFillColor sfc(screen->gd, Color::grey70); Box(screen->x, win.y, screen->width, win.h).Draw(); }
     Draw();
     DrawGame(W, game ? game : Singleton<Chess::Game>::Get(), now);
 
     W->gd->DisableBlend();
-    chess_terminal->terminal->Draw(term);
+    { Scissor s(W->gd, term); chess_terminal->terminal->Draw(term); }
     if (divider.changing) BoxOutline().Draw(Box::DelBorder(term, Border(1,1,1,1)));
 
     W->DrawDialogs();
@@ -393,7 +395,6 @@ extern "C" void MyAppCreate(int argc, const char* const* argv) {
 extern "C" int MyAppMain() {
 #ifdef LFL_MOBILE
   app->SetExtraScale(true);
-  app->SetTouchKeyboardTiled(false);
 #endif
   if (app->Create(__FILE__)) return -1;
   if (app->Init()) return -1;
