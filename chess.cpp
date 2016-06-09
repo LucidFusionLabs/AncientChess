@@ -191,7 +191,7 @@ struct ChessGUI : public GUI {
 
   void Reshaped() { divider.size = screen->width; }
   void Layout() {
-    Reset();
+    ResetGUI();
     win = screen->Box();
     term.w = win.w;
     term_dim.x = win.w / Fonts::InitFontWidth();
@@ -349,6 +349,7 @@ void MyWindowInit(Window *W) {
 }
 
 void MyWindowStart(Window *W) {
+  if (FLAGS_console) W->InitConsole(Callback());
   ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>());
   chess_gui->chess_terminal = make_unique<ChessTerminalWindow>
     (W->AddGUI(make_unique<FICSTerminal>(nullptr, W->gd, W->default_font, chess_gui->term_dim)));
@@ -356,7 +357,7 @@ void MyWindowStart(Window *W) {
   W->reshaped_cb = bind(&ChessGUI::Reshaped, chess_gui);
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
   W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
-  if (FLAGS_console) W->InitConsole(bind(&ChessGUI::ConsoleAnimatingCB, chess_gui));
+  if (FLAGS_console) W->console->animating_cb = bind(&ChessGUI::ConsoleAnimatingCB, chess_gui);
 
   W->shell = make_unique<Shell>(&my_app->asset, &my_app->soundasset, nullptr);
   W->shell->Add("games",       bind(&ChessGUI::ListGames, chess_gui));
@@ -445,6 +446,6 @@ extern "C" int MyAppMain() {
   app->AddNativeEditMenu(edit_menu);
   app->AddNativeMenu("View", view_menu);
 
-  screen->GetGUI<ChessGUI>(0)->Open(FLAGS_connect);
+  screen->GetOwnGUI<ChessGUI>(0)->Open(FLAGS_connect);
   return app->Main();
 }
