@@ -27,8 +27,8 @@ struct FICSTerminal : public ChessTerminal {
   AhoCorasickFSM<char> move_fsm;
   StringMatcher<char> move_matcher;
 
-  FICSTerminal(ByteSink *O, GraphicsDevice *D, const FontRef &F, const point &dim) :
-    ChessTerminal(O, D, F, dim), local_cmd(F), move_fsm({"\r<12> "}),
+  FICSTerminal(ByteSink *O, Window *W, const FontRef &F, const point &dim) :
+    ChessTerminal(O, W, F, dim), local_cmd(F), move_fsm({"\r<12> "}),
     move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
     move_matcher.match_cb = bind(&FICSTerminal::FICSGameUpdateCB, this, _1);

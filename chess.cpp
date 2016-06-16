@@ -48,7 +48,7 @@ struct ChessGUI : public GUI {
   bool title_changed = 0, console_animating = 0;
   Time move_animation_time = Time(200);
   DragTracker drag_tracker;
-  ChessGUI() : divider(this, true, screen->width) { (top_game = &game_map[0])->active = 0; }
+  ChessGUI(Window *W) : GUI(W), divider(this, true, screen->width) { (top_game = &game_map[0])->active = 0; }
 
   /**/  Chess::Game *Top()       { return top_game; }
   const Chess::Game *Top() const { return top_game; }
@@ -213,6 +213,7 @@ struct ChessGUI : public GUI {
     chess_terminal->ReadAndUpdateTerminalFramebuffer();
     Chess::Game *game = Top();
     Time now = Now();
+    GraphicsContext gc(W->gd);
 
     if (game && (title_changed || game->active)) {
       if (game && game->active) {
@@ -233,14 +234,13 @@ struct ChessGUI : public GUI {
     }
 
     if (divider.changed) Layout();
-    if (win.w != screen->width)
-    { ScopedFillColor sfc(screen->gd, Color::grey70); Box(screen->x, win.y, screen->width, win.h).Draw(); }
+    if (win.w != W->width) { ScopedFillColor sfc(W->gd, Color::grey70); Box(W->x, win.y, W->width, win.h).Draw(W->gd); }
     Draw();
     DrawGame(W, game ? game : Singleton<Chess::Game>::Get(), now);
 
     W->gd->DisableBlend();
     { Scissor s(W->gd, term); chess_terminal->terminal->Draw(term); }
-    if (divider.changing) BoxOutline().Draw(Box::DelBorder(term, Border(1,1,1,1)));
+    if (divider.changing) BoxOutline().Draw(&gc, Box::DelBorder(term, Border(1,1,1,1)));
 
     W->DrawDialogs();
     return 0;
@@ -250,19 +250,20 @@ struct ChessGUI : public GUI {
     int black_font_index[7] = { 0, 3, 2, 0, 5, 4, 1 }, bits[65];
     static Font *pieces = app->fonts->Get("ChessPieces1");
     Drawable::Attr draw_attr(pieces);
+    GraphicsContext gc(W->gd);
     for (int i=Chess::PAWN; i <= Chess::KING; i++) {
-      Bit::Indices(game->position.white[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(black_font_index[i]+6, SquareCoords(*b, game->flip_board));
-      Bit::Indices(game->position.black[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(black_font_index[i],   SquareCoords(*b, game->flip_board));
+      Bit::Indices(game->position.white[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(W->gd, black_font_index[i]+6, SquareCoords(*b, game->flip_board));
+      Bit::Indices(game->position.black[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(W->gd, black_font_index[i],   SquareCoords(*b, game->flip_board));
     }
 
     if (game->position.square_from != -1 && game->position.square_to != -1) {
-      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(SquareCoords(game->position.square_from, game->flip_board));
-      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(SquareCoords(game->position.square_to,   game->flip_board));
+      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(&gc, SquareCoords(game->position.square_from, game->flip_board));
+      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(&gc, SquareCoords(game->position.square_to,   game->flip_board));
     }
 
     for (auto &pm : game->premove) {
-      W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(SquareCoords(pm.square_from, game->flip_board));
-      W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(SquareCoords(pm.square_to,   game->flip_board));
+      W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(&gc, SquareCoords(pm.square_from, game->flip_board));
+      W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(&gc, SquareCoords(pm.square_to,   game->flip_board));
     }
 
     if (game->moving_piece.second) {
@@ -270,12 +271,12 @@ struct ChessGUI : public GUI {
       Chess::BitBoard moves = PieceMoves(game->position, game->moving_piece.second, start_square, game->moving_piece.first);
       Bit::Indices(moves, bits);
       W->gd->SetColor(Color(255, 85, 255));
-      for (int *b = bits; *b != -1; b++)   BoxOutline().Draw(SquareCoords(*b, game->flip_board));
-      W->gd->SetColor(Color(170, 0, 170)); BoxOutline().Draw(SquareCoords(start_square, game->flip_board));
+      for (int *b = bits; *b != -1; b++)   BoxOutline().Draw(&gc, SquareCoords(*b, game->flip_board));
+      W->gd->SetColor(Color(170, 0, 170)); BoxOutline().Draw(&gc, SquareCoords(start_square, game->flip_board));
       W->gd->SetColor(Color::white);
 
       int glyph_index = black_font_index[game->moving_piece.second] + 6*(!game->moving_piece.first);
-      pieces->DrawGlyph(glyph_index, SquareCoords(start_square, game->flip_board) + (drag_tracker.end_click - drag_tracker.beg_click));
+      pieces->DrawGlyph(W->gd, glyph_index, SquareCoords(start_square, game->flip_board) + (drag_tracker.end_click - drag_tracker.beg_click));
     } else W->gd->SetColor(Color::white);
 
     if (game->move_animate_from != -1) {
@@ -290,7 +291,7 @@ struct ChessGUI : public GUI {
       float percent = min(1.0f, float((now - game->move_animation_start).count()) / move_animation_time.count());
       point slope(end_square.centerX() - start_square.centerX(), end_square.centerY() - start_square.centerY());
       point pos = start_square.center() + slope * percent;
-      pieces->DrawGlyph(glyph_index, Box(pos.x - start_square.w/2, pos.y - start_square.h/2, start_square.w, start_square.h));
+      pieces->DrawGlyph(W->gd, glyph_index, Box(pos.x - start_square.w/2, pos.y - start_square.h/2, start_square.w, start_square.h));
     }
   }
 
@@ -343,16 +344,16 @@ struct ChessGUI : public GUI {
 };
 
 void MyWindowInit(Window *W) {
-  screen->caption = "Chess";
-  screen->width = 630;
-  screen->height = 630 + my_app->initial_term_dim.y * Fonts::InitFontHeight();
+  W->caption = "Chess";
+  W->width = 630;
+  W->height = 630 + my_app->initial_term_dim.y * Fonts::InitFontHeight();
 }
 
 void MyWindowStart(Window *W) {
   if (FLAGS_console) W->InitConsole(Callback());
-  ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>());
+  ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>(W));
   chess_gui->chess_terminal = make_unique<ChessTerminalWindow>
-    (W->AddGUI(make_unique<FICSTerminal>(nullptr, W->gd, W->default_font, chess_gui->term_dim)));
+    (W->AddGUI(make_unique<FICSTerminal>(nullptr, W, W->default_font, chess_gui->term_dim)));
 
   W->reshaped_cb = bind(&ChessGUI::Reshaped, chess_gui);
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
