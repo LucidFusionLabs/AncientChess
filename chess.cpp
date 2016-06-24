@@ -29,8 +29,6 @@ DEFINE_bool(click_or_drag_pieces, MOBILE, "Move by clicking or dragging");
 DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game starts");
 
 struct MyAppState {
-  AssetMap asset;
-  SoundAssetMap soundasset;
   point initial_term_dim = point(0, 10);
 } *my_app;
 
@@ -100,7 +98,7 @@ struct ChessGUI : public GUI {
     game->Reset();
     game->game_number = game_no;
     if (FLAGS_enable_audio) {
-      static SoundAsset *start_sound = my_app->soundasset("start");
+      static SoundAsset *start_sound = app->soundasset("start");
       app->PlaySoundEffect(start_sound);
     }
     if (FLAGS_auto_close_old_games) FilterValues<unordered_map<int, Chess::Game>>
@@ -110,7 +108,7 @@ struct ChessGUI : public GUI {
   void GameOverCB(int game_no, const string &p1, const string &p2, const string &result) {
     bool lose = (my_name == p1 && result == "0-1") || (my_name == p2 && result == "1-0");
     if (FLAGS_enable_audio) {
-      static SoundAsset *win_sound = my_app->soundasset("win"), *lose_sound = my_app->soundasset("lose");
+      static SoundAsset *win_sound = app->soundasset("win"), *lose_sound = app->soundasset("lose");
       app->PlaySoundEffect(lose ? lose_sound : win_sound);
     }
     game_map[game_no].active = false;
@@ -120,7 +118,7 @@ struct ChessGUI : public GUI {
     top_game = game;
     title_changed = true;
     if (FLAGS_enable_audio) {
-      static SoundAsset *move_sound = my_app->soundasset("move"), *capture_sound = my_app->soundasset("capture");
+      static SoundAsset *move_sound = app->soundasset("move"), *capture_sound = app->soundasset("capture");
       app->PlaySoundEffect(game->position.capture ? capture_sound : move_sound);
     }
     if (game->position.number == 0) {
@@ -139,7 +137,7 @@ struct ChessGUI : public GUI {
 
   void IllegalMoveCB() {
     if (FLAGS_enable_audio) {
-      static SoundAsset *illegal_sound = my_app->soundasset("illegal");
+      static SoundAsset *illegal_sound = app->soundasset("illegal");
       app->PlaySoundEffect(illegal_sound);
     }
   }
@@ -195,7 +193,8 @@ struct ChessGUI : public GUI {
     win = screen->Box();
     term.w = win.w;
     term_dim.x = win.w / Fonts::InitFontWidth();
-    divider.max_size = win.w;
+    int min_term_h = chess_terminal->terminal->style.font->Height() * 3;
+    divider.max_size = min(win.w, win.h - min_term_h);
     divider.LayoutDivideTop(win, &win, &term);
     CHECK_LE(win.h, win.w);
     if (int d = win.w - win.h) { win.w -= d; win.x += d/2; }
@@ -205,7 +204,7 @@ struct ChessGUI : public GUI {
     if (FLAGS_click_or_drag_pieces) mouse.AddClickBox(board, MouseController::CoordCB(bind(&ChessGUI::ClickCB, this, _1, _2, _3, _4)));
     else                            mouse.AddDragBox (board, MouseController::CoordCB(bind(&ChessGUI::DragCB,  this, _1, _2, _3, _4)));
 
-    Texture *board_tex = &my_app->asset("board1")->tex;
+    Texture *board_tex = &app->asset("board1")->tex;
     child_box.PushBack(win, Drawable::Attr(board_tex), board_tex);
   }
 
@@ -360,7 +359,7 @@ void MyWindowStart(Window *W) {
   W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->console->animating_cb = bind(&ChessGUI::ConsoleAnimatingCB, chess_gui);
 
-  W->shell = make_unique<Shell>(&my_app->asset, &my_app->soundasset, nullptr);
+  W->shell = make_unique<Shell>();
   W->shell->Add("games",       bind(&ChessGUI::ListGames, chess_gui));
   W->shell->Add("flip",        bind(&ChessGUI::FlipBoard, chess_gui, W, _1));
   W->shell->Add("undopremove", bind(&ChessGUI::UndoPremove, chess_gui, W));
@@ -392,12 +391,15 @@ extern "C" void MyAppCreate(int argc, const char* const* argv) {
   app->window_init_cb = MyWindowInit;
   app->window_init_cb(screen);
   app->exit_cb = [](){ delete my_app; };
+#ifdef LFL_MOBILE
+  app->SetExtraScale(true);
+  app->SetTitleBar(true);
+  app->SetKeepScreenOn(false);
+  app->CloseTouchKeyboardAfterReturn(false);
+#endif
 }
 
 extern "C" int MyAppMain() {
-#ifdef LFL_MOBILE
-  app->SetExtraScale(true);
-#endif
   if (app->Create(__FILE__)) return -1;
 #ifdef WIN32
   app->asset_cache["default.vert"]                                    = app->LoadResource(200);
@@ -424,18 +426,18 @@ extern "C" int MyAppMain() {
   app->scheduler.AddWaitForeverMouse(screen);
   app->StartNewWindow(screen);
 
-  // my_app->asset.Add(name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
-  my_app->asset.Add("board1", "board1.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
-  my_app->asset.Load();
+  // app->asset.Add(name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
+  app->asset.Add("board1", "board1.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
+  app->asset.Load();
 
-  // my_app->soundasset.Add(name,   filename,      ringbuf, channels, sample_rate, seconds );
-  my_app->soundasset.Add("start",   "start.wav",   nullptr, 0,        0,           0       );
-  my_app->soundasset.Add("move",    "move.wav",    nullptr, 0,        0,           0       );
-  my_app->soundasset.Add("capture", "capture.wav", nullptr, 0,        0,           0       );
-  my_app->soundasset.Add("win",     "win.wav",     nullptr, 0,        0,           0       );
-  my_app->soundasset.Add("lose",    "lose.wav",    nullptr, 0,        0,           0       );
-  my_app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
-  my_app->soundasset.Load();
+  // app->soundasset.Add(name,   filename,      ringbuf, channels, sample_rate, seconds );
+  app->soundasset.Add("start",   "start.wav",   nullptr, 0,        0,           0       );
+  app->soundasset.Add("move",    "move.wav",    nullptr, 0,        0,           0       );
+  app->soundasset.Add("capture", "capture.wav", nullptr, 0,        0,           0       );
+  app->soundasset.Add("win",     "win.wav",     nullptr, 0,        0,           0       );
+  app->soundasset.Add("lose",    "lose.wav",    nullptr, 0,        0,           0       );
+  app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
+  app->soundasset.Load();
 
   vector<MenuItem> file_menu{ MenuItem{ "q", "Quit LChess", "quit" } };
   vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" },
