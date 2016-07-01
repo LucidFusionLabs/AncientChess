@@ -36,6 +36,7 @@ struct FICSTerminal : public ChessTerminal {
     line_fb.only_grow = cmd_fb.only_grow = true;
   }
 
+  virtual void Send    (const string &text) { controller->Write(StrCat(text, "\n")); }
   virtual void MakeMove(const string &move) { controller->Write(StrCat(move, "\n")); }
   virtual void Input(char k) { local_cmd.Input(k); Terminal::Write(StringPiece(&k, 1)); }
   virtual void Erase      () { local_cmd.Erase();  Terminal::Write(StringPiece("\x08\x1b[1P")); }

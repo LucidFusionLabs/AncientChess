@@ -314,6 +314,7 @@ struct ChessTerminal : public Terminal {
   function<void(Chess::Game*, bool, int, int)> game_update_cb;
 
   using Terminal::Terminal;
+  virtual void Send(const string &) = 0;
   virtual void MakeMove(const string&) = 0;
 };
 #endif // LFL_CORE_APP_GUI_H__

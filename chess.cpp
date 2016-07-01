@@ -27,6 +27,7 @@ namespace LFL {
 DEFINE_string(connect, "freechess.org:5000", "Connect to server");
 DEFINE_bool(click_or_drag_pieces, MOBILE, "Move by clicking or dragging");
 DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game starts");
+DEFINE_string(seek_command, "5 0", "Seek command");
 
 struct MyAppState {
   point initial_term_dim = point(0, 10);
@@ -358,12 +359,20 @@ void MyWindowStart(Window *W) {
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
   W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->console->animating_cb = bind(&ChessGUI::ConsoleAnimatingCB, chess_gui);
+  auto seek_command = &FLAGS_seek_command;
 
   W->shell = make_unique<Shell>();
   W->shell->Add("games",       bind(&ChessGUI::ListGames, chess_gui));
   W->shell->Add("flip",        bind(&ChessGUI::FlipBoard, chess_gui, W, _1));
   W->shell->Add("undopremove", bind(&ChessGUI::UndoPremove, chess_gui, W));
   W->shell->Add("copypgn",     bind(&ChessGUI::CopyPGNToClipboard, chess_gui));
+  W->shell->Add("history+",    bind(&ChessGUI::WalkHistory, chess_gui, false));
+  W->shell->Add("history-",    bind(&ChessGUI::WalkHistory, chess_gui, true));
+  W->shell->Add("draw",        bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); }));
+  W->shell->Add("resign",      bind([=](){ chess_gui->chess_terminal->terminal->Send("resign"); }));
+  W->shell->Add("askresign",   bind(&Application::LaunchNativeAlert, app, "askresign", ""));
+  W->shell->Add("askseek",     bind([=](){ app->LaunchNativeAlert("askseek", *seek_command); }));
+  W->shell->Add("seektype",    bind([=](const vector<string> &a){ chess_gui->chess_terminal->terminal->Send((*seek_command = "seek " + Join(a, " "))); }, _1));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
@@ -448,6 +457,25 @@ extern "C" int MyAppMain() {
   app->AddNativeMenu("LChess", file_menu);
   app->AddNativeEditMenu(edit_menu);
   app->AddNativeMenu("View", view_menu);
+
+  vector<pair<string,string>> seek_alert = {
+    { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" },
+    { "Cancel", "" }, { "Continue", "seektype" } };
+  app->AddNativeAlert("askseek", seek_alert);
+
+  vector<pair<string,string>> resign_alert = {
+    { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" },
+    { "No", "" }, { "Yes", "resign" } };
+  app->AddNativeAlert("askresign", resign_alert);
+
+#ifdef LFL_MOBILE
+  vector<pair<string,string>> main_toolbar = { 
+    { "\U000025C0", "history-" }, { "\U000025B6", "history+" },
+    { "seek", "askseek" }, { "resign", "askresign" }, { "draw", "draw" }, 
+    { "flip", "flip" }, { "undo", "undopremove" } };
+    app->AddToolbar("main_toolbar", main_toolbar);
+    app->ShowToolbar("main_toolbar", true);
+#endif
 
   screen->GetOwnGUI<ChessGUI>(0)->Open(FLAGS_connect);
   return app->Main();
