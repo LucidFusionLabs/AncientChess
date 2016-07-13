@@ -31,6 +31,9 @@ DEFINE_string(seek_command, "5 0", "Seek command");
 
 struct MyAppState {
   point initial_term_dim = point(0, 10);
+  unique_ptr<SystemAlertWidget> askseek, askresign;
+  unique_ptr<SystemMenuWidget> editmenu, viewmenu, gamemenu;
+  unique_ptr<SystemToolbarWidget> maintoolbar;
 } *my_app;
 
 typedef TerminalWindowT<ChessTerminal> ChessTerminalWindow;
@@ -91,7 +94,7 @@ struct ChessGUI : public GUI {
     UpdateAnimating(screen);
   }
 
-  void ClosedCB() {}
+  void ClosedCB() { chess_terminal->terminal->Write("\r\nConnection closed.\r\n"); }
   void LoginCB(const string &n) { screen->SetCaption(StrCat((my_name = n), " @ ", FLAGS_connect)); }
 
   void GameStartCB(int game_no) {
@@ -234,7 +237,7 @@ struct ChessGUI : public GUI {
     }
 
     if (divider.changed) Layout();
-    if (win.w != W->width) { ScopedFillColor sfc(W->gd, Color::grey70); Box(W->x, win.y, W->width, win.h).Draw(W->gd); }
+    if (win.w != W->width) { ScopedFillColor sfc(W->gd, Color::grey70); gc.DrawTexturedBox(Box(W->x, win.y, W->width, win.h)); }
     Draw();
     DrawGame(W, game ? game : Singleton<Chess::Game>::Get(), now);
 
@@ -370,9 +373,9 @@ void MyWindowStart(Window *W) {
   W->shell->Add("history-",    bind(&ChessGUI::WalkHistory, chess_gui, true));
   W->shell->Add("draw",        bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); }));
   W->shell->Add("resign",      bind([=](){ chess_gui->chess_terminal->terminal->Send("resign"); }));
-  W->shell->Add("askresign",   bind(&Application::LaunchNativeAlert, app, "askresign", ""));
-  W->shell->Add("askseek",     bind([=](){ app->LaunchNativeAlert("askseek", *seek_command); }));
-  W->shell->Add("seektype",    bind([=](const vector<string> &a){ chess_gui->chess_terminal->terminal->Send((*seek_command = "seek " + Join(a, " "))); }, _1));
+  W->shell->Add("askresign",   bind([=](){ my_app->askresign->Show("");            }));
+  W->shell->Add("askseek",     bind([=](){ my_app->askseek  ->Show(*seek_command); }));
+  W->shell->Add("seektype",    bind([=](const vector<string> &a){ chess_gui->chess_terminal->terminal->Send("seek " + (*seek_command = Join(a, " "))); }, _1));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
@@ -431,8 +434,8 @@ extern "C" int MyAppMain() {
 #endif
   if (app->Init()) return -1;
   app->fonts->atlas_engine.get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
-  app->scheduler.AddWaitForeverKeyboard(screen);
-  app->scheduler.AddWaitForeverMouse(screen);
+  app->scheduler.AddFrameWaitKeyboard(screen);
+  app->scheduler.AddFrameWaitMouse(screen);
   app->StartNewWindow(screen);
 
   // app->asset.Add(name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
@@ -448,33 +451,35 @@ extern "C" int MyAppMain() {
   app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
   app->soundasset.Load();
 
-  vector<MenuItem> file_menu{ MenuItem{ "q", "Quit LChess", "quit" } };
+  vector<pair<string,string>> seek_alert = {
+    { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" },
+    { "Cancel", "" }, { "Continue", "seektype" } };
+  my_app->askseek = make_unique<SystemAlertWidget>(seek_alert);
+
+  vector<pair<string,string>> resign_alert = {
+    { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" },
+    { "No", "" }, { "Yes", "resign" } };
+  my_app->askresign = make_unique<SystemAlertWidget>(resign_alert);
+
+#ifndef LFL_MOBILE
   vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" },
     MenuItem{ "<left>", "Previous move", "" }, MenuItem{ "<right>", "Next move", "" },
     MenuItem{ "<up>", "Scroll up", "" }, MenuItem{ "<down>", "Scroll down", "" }, };
   vector<MenuItem> edit_menu{ MenuItem{ "u", "Undo pre-move", "undopremove" },
     MenuItem{ "", "Copy PGN to clipboard", "copypgn" } };
-  app->AddNativeMenu("LChess", file_menu);
-  app->AddNativeEditMenu(edit_menu);
-  app->AddNativeMenu("View", view_menu);
+  vector<MenuItem> game_menu{ MenuItem{ "s", "Seek", "askseek" }, MenuItem{ "d", "Offer Draw", "draw" },
+    MenuItem{ "r", "Resign", "askresign" }, };
 
-  vector<pair<string,string>> seek_alert = {
-    { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" },
-    { "Cancel", "" }, { "Continue", "seektype" } };
-  app->AddNativeAlert("askseek", seek_alert);
-
-  vector<pair<string,string>> resign_alert = {
-    { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" },
-    { "No", "" }, { "Yes", "resign" } };
-  app->AddNativeAlert("askresign", resign_alert);
-
-#ifdef LFL_MOBILE
+  my_app->editmenu = SystemMenuWidget::CreateEditMenu(edit_menu);
+  my_app->viewmenu = make_unique<SystemMenuWidget>("View", view_menu);
+  my_app->gamemenu = make_unique<SystemMenuWidget>("Game", game_menu);
+#else
   vector<pair<string,string>> main_toolbar = { 
     { "\U000025C0", "history-" }, { "\U000025B6", "history+" },
     { "seek", "askseek" }, { "resign", "askresign" }, { "draw", "draw" }, 
     { "flip", "flip" }, { "undo", "undopremove" } };
-    app->AddToolbar("main_toolbar", main_toolbar);
-    app->ShowToolbar("main_toolbar", true);
+  my_app->maintoolbar = make_unique<SystemToolbarWidget>(main_toolbar);
+  my_app->maintoolbar->Show(true);
 #endif
 
   screen->GetOwnGUI<ChessGUI>(0)->Open(FLAGS_connect);
