@@ -21,6 +21,9 @@
 #include "core/app/ipc.h"
 #include "chess.h"
 #include "fics.h"
+#ifdef LFL_FLATBUFFERS
+#include "term/term_generated.h"
+#endif
 #include "term/term.h"
 
 namespace LFL {
@@ -30,7 +33,8 @@ DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game start
 DEFINE_string(seek_command, "5 0", "Seek command");
 
 struct MyAppState {
-  point initial_term_dim = point(0, 10);
+  point initial_board_dim = point(630, 630);
+  point initial_term_dim = point(initial_board_dim.x / Fonts::InitFontWidth(), 10);
   unique_ptr<SystemAlertWidget> askseek, askresign;
   unique_ptr<SystemMenuWidget> editmenu, viewmenu, gamemenu;
   unique_ptr<SystemToolbarWidget> maintoolbar;
@@ -193,11 +197,12 @@ struct ChessGUI : public GUI {
 
   void Reshaped() { divider.size = screen->width; }
   void Layout() {
+    Font *font = chess_terminal->terminal->style.font;
     ResetGUI();
     win = screen->Box();
     term.w = win.w;
-    term_dim.x = win.w / Fonts::InitFontWidth();
-    int min_term_h = chess_terminal->terminal->style.font->Height() * 3;
+    term_dim.x = win.w / font->FixedWidth();
+    int min_term_h = font->Height() * 3;
     divider.max_size = min(win.w, win.h - min_term_h);
     divider.LayoutDivideTop(win, &win, &term);
     CHECK_LE(win.h, win.w);
@@ -348,8 +353,8 @@ struct ChessGUI : public GUI {
 
 void MyWindowInit(Window *W) {
   W->caption = "Chess";
-  W->width = 630;
-  W->height = 630 + my_app->initial_term_dim.y * Fonts::InitFontHeight();
+  W->width = my_app->initial_board_dim.x;
+  W->height = my_app->initial_board_dim.y + my_app->initial_term_dim.y * Fonts::InitFontHeight();
 }
 
 void MyWindowStart(Window *W) {
