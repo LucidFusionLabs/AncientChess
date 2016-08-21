@@ -35,9 +35,9 @@ DEFINE_string(seek_command, "5 0", "Seek command");
 struct MyAppState {
   point initial_board_dim = point(630, 630);
   point initial_term_dim = point(initial_board_dim.x / Fonts::InitFontWidth(), 10);
-  unique_ptr<SystemAlertWidget> askseek, askresign;
-  unique_ptr<SystemMenuWidget> editmenu, viewmenu, gamemenu;
-  unique_ptr<SystemToolbarWidget> maintoolbar;
+  unique_ptr<SystemAlertView> askseek, askresign;
+  unique_ptr<SystemMenuView> editmenu, viewmenu, gamemenu;
+  unique_ptr<SystemToolbarView> maintoolbar;
 } *my_app;
 
 typedef TerminalWindowT<ChessTerminal> ChessTerminalWindow;
@@ -90,7 +90,7 @@ struct ChessGUI : public GUI {
   }
 
   void ListGames() { for (auto &i : game_map) INFO(i.first, " ", i.second.p1_name, " vs ", i.second.p2_name); }
-  void FlipBoard(Window *w, const vector<string>&) { if (auto g = Top()) g->flip_board = !g->flip_board; app->scheduler.Wakeup(w); }
+  void FlipBoard(Window *w) { if (auto g = Top()) g->flip_board = !g->flip_board; app->scheduler.Wakeup(w); }
   void UpdateAnimating(Window *w) { app->scheduler.SetAnimating(w, (Top() && Top()->move_animate_from != -1) | console_animating); }
 
   void ConsoleAnimatingCB() {
@@ -367,20 +367,9 @@ void MyWindowStart(Window *W) {
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
   W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->console->animating_cb = bind(&ChessGUI::ConsoleAnimatingCB, chess_gui);
-  auto seek_command = &FLAGS_seek_command;
 
   W->shell = make_unique<Shell>();
-  W->shell->Add("games",       bind(&ChessGUI::ListGames, chess_gui));
-  W->shell->Add("flip",        bind(&ChessGUI::FlipBoard, chess_gui, W, _1));
-  W->shell->Add("undopremove", bind(&ChessGUI::UndoPremove, chess_gui, W));
-  W->shell->Add("copypgn",     bind(&ChessGUI::CopyPGNToClipboard, chess_gui));
-  W->shell->Add("history+",    bind(&ChessGUI::WalkHistory, chess_gui, false));
-  W->shell->Add("history-",    bind(&ChessGUI::WalkHistory, chess_gui, true));
-  W->shell->Add("draw",        bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); }));
-  W->shell->Add("resign",      bind([=](){ chess_gui->chess_terminal->terminal->Send("resign"); }));
-  W->shell->Add("askresign",   bind([=](){ my_app->askresign->Show("");            }));
-  W->shell->Add("askseek",     bind([=](){ my_app->askseek  ->Show(*seek_command); }));
-  W->shell->Add("seektype",    bind([=](const vector<string> &a){ chess_gui->chess_terminal->terminal->Send("seek " + (*seek_command = Join(a, " "))); }, _1));
+  W->shell->Add("games", bind(&ChessGUI::ListGames, chess_gui));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
@@ -443,6 +432,9 @@ extern "C" int MyAppMain() {
   app->scheduler.AddFrameWaitMouse(screen);
   app->StartNewWindow(screen);
 
+  ChessGUI *chess_gui = screen->GetOwnGUI<ChessGUI>(0);
+  auto seek_command = &FLAGS_seek_command;
+
   // app->asset.Add(name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
   app->asset.Add("board1", "board1.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
   app->asset.Load();
@@ -456,37 +448,45 @@ extern "C" int MyAppMain() {
   app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
   app->soundasset.Load();
 
-  vector<pair<string,string>> seek_alert = {
-    { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" },
-    { "Cancel", "" }, { "Continue", "seektype" } };
-  my_app->askseek = make_unique<SystemAlertWidget>(seek_alert);
+  my_app->askseek = make_unique<SystemAlertView>(AlertItemVec{
+    { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" }, { "Cancel", },
+    { "Continue", "", bind([=](const string &a){ chess_gui->chess_terminal->terminal->Send("seek " + (*seek_command = a)); }, _1)}
+  });
 
-  vector<pair<string,string>> resign_alert = {
-    { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" },
-    { "No", "" }, { "Yes", "resign" } };
-  my_app->askresign = make_unique<SystemAlertWidget>(resign_alert);
+  my_app->askresign = make_unique<SystemAlertView>(AlertItemVec{
+    { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" }, { "No" },
+    { "Yes", "", bind([=](){ chess_gui->chess_terminal->terminal->Send("resign"); })}
+  });
 
 #ifndef LFL_MOBILE
-  vector<MenuItem> view_menu{ MenuItem{ "f", "Flip board", "flip" },
-    MenuItem{ "<left>", "Previous move", "" }, MenuItem{ "<right>", "Next move", "" },
-    MenuItem{ "<up>", "Scroll up", "" }, MenuItem{ "<down>", "Scroll down", "" }, };
-  vector<MenuItem> edit_menu{ MenuItem{ "u", "Undo pre-move", "undopremove" },
-    MenuItem{ "", "Copy PGN to clipboard", "copypgn" } };
-  vector<MenuItem> game_menu{ MenuItem{ "s", "Seek", "askseek" }, MenuItem{ "d", "Offer Draw", "draw" },
-    MenuItem{ "r", "Resign", "askresign" }, };
-
-  my_app->editmenu = SystemMenuWidget::CreateEditMenu(edit_menu);
-  my_app->viewmenu = make_unique<SystemMenuWidget>("View", view_menu);
-  my_app->gamemenu = make_unique<SystemMenuWidget>("Game", game_menu);
+  my_app->editmenu = SystemMenuView::CreateEditMenu(MenuItemVec{
+    MenuItem{ "u", "Undo pre-move",         bind(&ChessGUI::UndoPremove, chess_gui, screen)},
+    MenuItem{ "",  "Copy PGN to clipboard", bind(&ChessGUI::CopyPGNToClipboard, chess_gui)}
+  });
+  my_app->viewmenu = make_unique<SystemMenuView>("View", MenuItemVec{
+    MenuItem{ "f",       "Flip board", bind(&ChessGUI::FlipBoard, chess_gui, screen)},
+    MenuItem{ "<left>",  "Previous move" },
+    MenuItem{ "<right>", "Next move" },
+    MenuItem{ "<up>",    "Scroll up" },    
+    MenuItem{ "<down>",  "Scroll down" }
+  });
+  my_app->gamemenu = make_unique<SystemMenuView>("Game", MenuItemVec{
+    MenuItem{ "s", "Seek",       bind([=](){ my_app->askseek->Show(*seek_command); })},
+    MenuItem{ "d", "Offer Draw", bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); })},
+    MenuItem{ "r", "Resign",     bind([=](){ my_app->askresign->Show(""); })}
+  });
 #else
-  vector<pair<string,string>> main_toolbar = { 
-    { "\U000025C0", "history-" }, { "\U000025B6", "history+" },
-    { "seek", "askseek" }, { "resign", "askresign" }, { "draw", "draw" }, 
-    { "flip", "flip" }, { "undo", "undopremove" } };
-  my_app->maintoolbar = make_unique<SystemToolbarWidget>(main_toolbar);
+  my_app->maintoolbar = make_unique<SystemToolbarView>(MenuItemVec{ 
+    MenuItem{ "\U000025C0", "", bind(&ChessGUI::WalkHistory, chess_gui, true) },
+    MenuItem{ "\U000025B6", "", bind(&ChessGUI::WalkHistory, chess_gui, false) },
+    MenuItem{ "seek",       "", bind([=](){ my_app->askseek->Show(*seek_command); }) },
+    MenuItem{ "resign",     "", bind([=](){ my_app->askresign->Show(""); }) },
+    MenuItem{ "draw",       "", bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); }) },
+    MenuItem{ "flip",       "", bind(&ChessGUI::FlipBoard,   chess_gui, screen) },
+    MenuItem{ "undo",       "", bind(&ChessGUI::UndoPremove, chess_gui, screen) }
+  });
   my_app->maintoolbar->Show(true);
 #endif
-
-  screen->GetOwnGUI<ChessGUI>(0)->Open(FLAGS_connect);
+  chess_gui->Open(FLAGS_connect);
   return app->Main();
 }
