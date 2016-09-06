@@ -42,7 +42,7 @@ struct FICSTerminal : public ChessTerminal {
   virtual void Erase      () { local_cmd.Erase();  Terminal::Write(StringPiece("\x08\x1b[1P")); }
   virtual void Enter      () {
     string cmd = String::ToUTF8(local_cmd.cmd_line.Text16());
-    if (cmd == "console" && screen && screen->shell) screen->shell->console(StringVec());
+    if (cmd == "console" && root && root->shell) root->shell->console(StringVec());
     else sink->Write(StrCat(cmd, "\n"));
     Terminal::Write(StringPiece("\r\n", 2));
     local_cmd.AssignInput("");
