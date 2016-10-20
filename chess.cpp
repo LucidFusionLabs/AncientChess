@@ -43,6 +43,7 @@ struct MyAppState {
 struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
   using TerminalTabT::TerminalTabT;
   virtual bool Animating() const { return false; }
+  virtual void UpdateTargetFPS() {}
   virtual void SetFontSize(int) {}
 };
 
@@ -485,8 +486,8 @@ extern "C" int MyAppMain() {
     MenuItem{ "seek",       "", bind([=](){ my_app->askseek->Show(*seek_command); }) },
     MenuItem{ "resign",     "", bind([=](){ my_app->askresign->Show(""); }) },
     MenuItem{ "draw",       "", bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); }) },
-    MenuItem{ "flip",       "", bind(&ChessGUI::FlipBoard,   chess_gui, screen) },
-    MenuItem{ "undo",       "", bind(&ChessGUI::UndoPremove, chess_gui, screen) }
+    MenuItem{ "flip",       "", bind(&ChessGUI::FlipBoard,   chess_gui, app->focused) },
+    MenuItem{ "undo",       "", bind(&ChessGUI::UndoPremove, chess_gui, app->focused) }
   });
   my_app->maintoolbar->Show(true);
 #endif
