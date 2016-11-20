@@ -85,7 +85,7 @@ static int SquareFromXY(int x, int y) { return (x<0 || y<0 || x>7 || y>7) ? -1 :
 static BitBoard SquareMask(int s) { return 1LL << s; }
 
 static int SquareID(const char *s) {
-  if (s[0] < 'a' || s[0] > 'h' || s[1] < '1' || s[1] > '8') return -1;
+  if (s[0] < 'a' || s[0] > 'h' || s[1] < '1' || s[1] > '8') return ERRORv(-1, "unknown square: ", s);
   return 8 * (s[1] - '1') + 7 - (s[0] - 'a');
 }
 
@@ -186,10 +186,10 @@ struct Position {
     return make_pair(false, 0);
   }
 
-  pair<bool,int> ClearSquare(int s) {
+  pair<bool,int> ClearSquare(int s, bool clear_white=true, bool clear_black=true) {
     BitBoard mask = (static_cast<BitBoard>(1) << s);
-    for (int i=1; i<7; i++) if (white[i] & mask) { white[0] &= ~mask; white[i] &= ~mask; return make_pair(0, i); }
-    for (int i=1; i<7; i++) if (black[i] & mask) { black[0] &= ~mask; black[i] &= ~mask; return make_pair(1, i); }
+    if (clear_white) for (int i=1; i<7; i++) if (white[i] & mask) { white[0] &= ~mask; white[i] &= ~mask; return make_pair(0, i); }
+    if (clear_black) for (int i=1; i<7; i++) if (black[i] & mask) { black[0] &= ~mask; black[i] &= ~mask; return make_pair(1, i); }
     return make_pair(false, 0);
   }
 };
@@ -203,10 +203,10 @@ struct Move : public Position {
 
 struct Game {
   string p1_name, p2_name;
-  Move position;
+  Move position, last_position;
   vector<Move> history;
   deque<Move> premove;
-  bool active = 1, my_color = 0, flip_board = 0;
+  bool active = 1, my_color = 0, flip_board = 0, engine_playing_white = 0, engine_playing_black = 0;
   int game_number = 0, history_ind = 0, p1_secs = 0, p2_secs = 0, last_p1_secs = 0, last_p2_secs = 0;
   int move_animate_from = -1, move_animate_to = -1;
   Time update_time, move_animation_start;
@@ -232,6 +232,7 @@ struct Game {
       else                                          position.fifty_move_rule_count++;
     }
     history.push_back(position);
+    last_position = position;
   }
 };
 
@@ -302,10 +303,70 @@ static bool InCheck(const Position &in, bool color) {
 
 }; // namespace Chess
 
+struct ChessEngine {
+  ProcessPipe process;
+  Window *window=0;
+  string readbuf;
+  NextRecordDispatcher linebuf;
+  deque<IntIntCB> result_cb;
+  int movesecs=0;
+
+  ChessEngine() { linebuf.cb = bind(&ChessEngine::LineCB, this, _1); }
+  virtual ~ChessEngine() { if (process.in) app->scheduler.DelMainWaitSocket(window, fileno(process.in)); }
+
+  bool Start(const string &bin, Window *w=0) {
+    if (process.in) return false;
+    vector<const char*> argv{ bin.c_str(), nullptr };
+    if (process.Open(argv.data(), app->startdir.c_str())) return false;
+    Socket fd = fileno(process.in);
+    SystemNetwork::SetSocketBlocking(fd, false);
+    if ((window = w)) app->scheduler.AddMainWaitSocket(window, fd, SocketSet::READABLE, bind(&ChessEngine::ReadCB, this));
+    CHECK(FWriteSuccess(process.out, "uci\nisready\n" ));
+    return true;
+  }
+
+  void Close() {
+    if (process.in) {
+      if (window) app->scheduler.DelMainWaitSocket(window, fileno(process.in));
+      process.Close();
+    }
+  }
+
+  void Analyze(Chess::Game *game, IntIntCB callback) {
+    string text;
+    if (game->history.size())
+      for (auto b = game->history.begin()+1, e = game->history.end(), i = b; i != e; ++i)
+        StrAppend(&text, i->name.substr(1), " ");
+    result_cb.emplace_back(move(callback));
+    CHECK(FWriteSuccess(process.out, StrCat("ucinewgame\nposition startpos moves ", text,
+                                            "\ngo movetime ", movesecs, "\n")));
+  }
+
+  bool ReadCB() {
+    readbuf.resize(16384);
+    if (NBRead(fileno(process.in), &readbuf) < 0) { ERROR("ChessEngine::ReadCB"); Close(); return true; }
+    if (readbuf.size()) { linebuf.AddData(readbuf, false); return true; }
+    return false;
+  }
+
+  void LineCB(const StringPiece &linebuf) {
+    string line = linebuf.str();
+    // INFO("ChessEngine '", line, "'");
+    if (PrefixMatch(line, "bestmove ") && line.size() >= 13) {
+      if (result_cb.size()) {
+        if (result_cb.front()) result_cb.front()(Chess::SquareID(line.substr(9, 2).c_str()),
+                                                 Chess::SquareID(line.substr(11, 2).c_str()));
+        result_cb.pop_front();
+      }
+    }
+  }
+};
+
 #ifdef LFL_CORE_APP_GUI_H__
 struct ChessTerminal : public Terminal {
   Terminal::Controller *controller=0;
   function<Chess::Game*(int)> get_game_cb;
+  UnbackedTextBox local_cmd;
 
   StringCB login_cb;
   Callback illegal_move_cb;
@@ -313,7 +374,28 @@ struct ChessTerminal : public Terminal {
   function<void(int, const string&, const string&, const string&)> game_over_cb;
   function<void(Chess::Game*, bool, int, int)> game_update_cb;
 
-  using Terminal::Terminal;
+  ChessTerminal(ByteSink *O, Window *W, const FontRef &F, const point &dim) : Terminal(O, W, F, dim), local_cmd(F) {}
+
+  virtual void Input(char k) { local_cmd.Input(k); Terminal::Write(StringPiece(&k, 1)); }
+  virtual void Erase      () { local_cmd.Erase();  Terminal::Write(StringPiece("\x08\x1b[1P")); }
+  virtual void Enter      () {
+    string cmd = String::ToUTF8(local_cmd.cmd_line.Text16());
+    if (cmd == "console" && root && root->shell) root->shell->console(StringVec());
+    else if (sink) sink->Write(StrCat(cmd, "\n"));
+    Terminal::Write(StringPiece("\r\n", 2));
+    local_cmd.AssignInput("");
+  }
+  virtual void Tab        () {}
+  virtual void Escape     () {}
+  virtual void HistUp     () {}
+  virtual void HistDown   () {}
+  virtual void CursorRight() {}
+  virtual void CursorLeft () {}
+  virtual void PageUp     () {}
+  virtual void PageDown   () {}
+  virtual void Home       () {}
+  virtual void End        () {}
+
   virtual void Send(const string &) = 0;
   virtual void MakeMove(const string&) = 0;
 };

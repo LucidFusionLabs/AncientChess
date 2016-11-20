@@ -19,6 +19,7 @@
 #include "core/app/app.h"
 #include "core/app/gui.h"
 #include "core/app/ipc.h"
+#include "core/app/net/resolver.h"
 #include "chess.h"
 #include "fics.h"
 #ifdef LFL_FLATBUFFERS
@@ -31,6 +32,7 @@ DEFINE_string(connect, "freechess.org:5000", "Connect to server");
 DEFINE_bool(click_or_drag_pieces, MOBILE, "Move by clicking or dragging");
 DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game starts");
 DEFINE_string(seek_command, "5 0", "Seek command");
+DEFINE_string(engine, "", "Chess engine");
 
 struct MyAppState {
   point initial_board_dim = point(630, 630);
@@ -48,6 +50,7 @@ struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
 };
 
 struct ChessGUI : public GUI {
+  unique_ptr<ChessEngine> chess_engine;
   unique_ptr<ChessTerminalTab> chess_terminal;
   point term_dim=my_app->initial_term_dim;
   v2 square_dim;
@@ -77,13 +80,16 @@ struct ChessGUI : public GUI {
 
   void Open(const string &hostport) {
     Activate();
-    INFO("connecting to ", hostport);
-    auto c = make_unique<NetworkTerminalController>(chess_terminal.get(), app->net->tcp_client.get(),
-                                                    hostport, bind(&ChessGUI::ClosedCB, this));
-    c->frame_on_keyboard_input = true;
-    chess_terminal->ChangeController(move(c));
+    if (hostport.size()) {
+      INFO("connecting to ", hostport);
+      auto c = make_unique<NetworkTerminalController>
+        (chess_terminal.get(), hostport, bind(&ChessGUI::ClosedCB, this));
+      c->frame_on_keyboard_input = true;
+      chess_terminal->ChangeController(move(c));
+    }
 
     auto t = chess_terminal->terminal;
+    t->touch_toggles_keyboard = true;
     t->controller      = chess_terminal->controller.get();
     t->get_game_cb     = [=](int game_no){ return &game_map[game_no]; };
     t->illegal_move_cb = bind(&ChessGUI::IllegalMoveCB, this);
@@ -92,6 +98,12 @@ struct ChessGUI : public GUI {
     t->game_over_cb    = bind(&ChessGUI::GameOverCB,    this, _1, _2, _3, _4);
     t->game_update_cb  = bind(&ChessGUI::GameUpdateCB,  this, _1, _2, _3, _4);
     t->SetColors(Singleton<Terminal::StandardVGAColors>::Get());
+  }
+
+  void Send(const string &b) {
+    ChessTerminal *t;
+    if ((t = chess_terminal->terminal) && t->controller) t->Send(b);
+    else if (auto e = chess_engine.get()) {}
   }
 
   void ListGames() { for (auto &i : game_map) INFO(i.first, " ", i.second.p1_name, " vs ", i.second.p2_name); }
@@ -135,7 +147,7 @@ struct ChessGUI : public GUI {
       app->PlaySoundEffect(game->position.capture ? capture_sound : move_sound);
     }
     if (game->position.number == 0) {
-      game->my_color = my_name == game->p2_name ? Chess::BLACK : Chess::WHITE;
+      game->my_color = my_name == game->p1_name ? Chess::WHITE : Chess::BLACK;
       game->flip_board = game->my_color == Chess::BLACK;
     }
     if (reapply_premove) ReapplyPremoves(game);
@@ -188,15 +200,41 @@ struct ChessGUI : public GUI {
     MakeMove(game, moved_piece.second, start_square, square);
   }
 
-  void MakeMove(Chess::Game *game, int piece, int start_square, int end_square) {
-    string move = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
-    if (game->position.move_color == game->my_color)
-      chess_terminal->terminal->MakeMove(move);
-    else {
-      auto &pm = PushBack(game->premove, game->position);
-      pm.name = move;
-      pm.square_from = start_square;
-      pm.square_to = end_square;
+  void MakeMove(Chess::Game *game, int piece, int start_square, int end_square, bool animate=false) {
+    ChessTerminal *t=0;
+    if ((t = chess_terminal->terminal) && t->controller) {
+      string move = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
+      if (game->position.move_color == game->my_color) t->MakeMove(move);
+      else {
+        auto &pm = PushBack(game->premove, game->position);
+        pm.name = move;
+        pm.square_from = start_square;
+        pm.square_to = end_square;
+      }
+    } else if (auto e = chess_engine.get()) {
+      bool move_color = game->position.move_color;
+      if (game->last_position.GetSquare(start_square).first != move_color ||
+          !(PieceMoves(game->last_position, piece, start_square, move_color) & Chess::SquareMask(end_square))) {
+        IllegalMoveCB();
+        game->position = game->last_position;
+      } else {
+        game->active = true;
+        game->update_time = Now();
+        game->position.number++;
+        game->position.square_from = start_square;
+        game->position.square_to = end_square;
+        game->position.move_color = !move_color;
+        game->position.name = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
+        if ((game->position.capture = game->last_position.GetSquare(end_square).second))
+          game->position.ClearSquare(end_square, move_color != Chess::WHITE, move_color != Chess::BLACK);
+        if (game->history.empty()) {
+          my_name = game->p1_name = "Player1";
+          game->p2_name = "Player2"; 
+          game->history.push_back(game->last_position);
+        }
+        game->HandleNewMove();
+        GameUpdateCB(game, animate, animate ? start_square : -1, animate ? end_square : -1);
+      }
     }
   }
 
@@ -353,6 +391,24 @@ struct ChessGUI : public GUI {
     StrAppend(&text, "\n");
     app->SetClipboardText(text);
   }
+
+  void StartEngine(bool black_or_white) {
+    bool started = false;
+    Chess::Game *game = Top();
+    if (!chess_engine || game->position.move_color != black_or_white) return;
+    if (black_or_white) started = Changed(&game->engine_playing_black, true);
+    else                started = Changed(&game->engine_playing_white, true);
+    // if (!started) return;
+    chess_engine->Analyze(game, [=](int square_from, int square_to){
+      game->position = game->last_position;                    
+      auto piece = game->position.ClearSquare(square_from);
+      if (piece.second) {
+        game->position.SetSquare(square_to, piece);
+        MakeMove(game, piece.second, square_from, square_to, true);
+      }
+      // INFO("bestmove ", Chess::SquareName(square_from), " ", Chess::SquareName(square_to));
+    });
+  }
 };
 
 void MyWindowInit(Window *W) {
@@ -382,6 +438,11 @@ void MyWindowStart(Window *W) {
   binds->Add(Key::Down,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(W); })));
   binds->Add(Key::Left,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->WalkHistory(1); app->scheduler.Wakeup(W); })));
   binds->Add(Key::Right, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->WalkHistory(0); app->scheduler.Wakeup(W); })));
+
+  if (FLAGS_engine.size()) {
+    chess_gui->chess_engine = make_unique<ChessEngine>();
+    CHECK(chess_gui->chess_engine->Start(Asset::FileName(FLAGS_engine), W));
+  }
 }
 
 }; // namespace LFL
@@ -405,6 +466,7 @@ extern "C" void MyAppCreate(int argc, const char* const* argv) {
   app->SetExtraScale(true);
   app->SetTitleBar(true);
   app->SetKeepScreenOn(false);
+  app->SetAutoRotateOrientation(true);
   app->CloseTouchKeyboardAfterReturn(false);
 #endif
 }
@@ -454,12 +516,12 @@ extern "C" int MyAppMain() {
 
   my_app->askseek = make_unique<SystemAlertView>(AlertItemVec{
     { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" }, { "Cancel", },
-    { "Continue", "", bind([=](const string &a){ chess_gui->chess_terminal->terminal->Send("seek " + (*seek_command = a)); }, _1)}
+    { "Continue", "", bind([=](const string &a){ chess_gui->Send("seek " + (*seek_command = a)); }, _1)}
   });
 
   my_app->askresign = make_unique<SystemAlertView>(AlertItemVec{
     { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" }, { "No" },
-    { "Yes", "", bind([=](){ chess_gui->chess_terminal->terminal->Send("resign"); })}
+    { "Yes", "", bind([=](){ chess_gui->Send("resign"); })}
   });
 
 #ifndef LFL_MOBILE
@@ -474,23 +536,31 @@ extern "C" int MyAppMain() {
     MenuItem{ "<up>",    "Scroll up" },    
     MenuItem{ "<down>",  "Scroll down" }
   });
-  my_app->gamemenu = make_unique<SystemMenuView>("Game", MenuItemVec{
-    MenuItem{ "s", "Seek",       bind([=](){ my_app->askseek->Show(*seek_command); })},
-    MenuItem{ "d", "Offer Draw", bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); })},
-    MenuItem{ "r", "Resign",     bind([=](){ my_app->askresign->Show(""); })}
-  });
+  {
+    MenuItemVec gamemenu{
+      MenuItem{ "s", "Seek",       bind([=](){ my_app->askseek->Show(*seek_command); })},
+      MenuItem{ "d", "Offer Draw", bind([=](){ chess_gui->Send("draw"); })},
+      MenuItem{ "r", "Resign",     bind([=](){ my_app->askresign->Show(""); })}
+    };
+    if (FLAGS_engine.size()) {
+      gamemenu.push_back(MenuItem{"", "Engine play white", bind(&ChessGUI::StartEngine, chess_gui, false) });
+      gamemenu.push_back(MenuItem{"", "Engine play black", bind(&ChessGUI::StartEngine, chess_gui, true) });
+    }
+    my_app->gamemenu = make_unique<SystemMenuView>("Game", move(gamemenu));
+  }
 #else
   my_app->maintoolbar = make_unique<SystemToolbarView>(MenuItemVec{ 
     MenuItem{ "\U000025C0", "", bind(&ChessGUI::WalkHistory, chess_gui, true) },
     MenuItem{ "\U000025B6", "", bind(&ChessGUI::WalkHistory, chess_gui, false) },
     MenuItem{ "seek",       "", bind([=](){ my_app->askseek->Show(*seek_command); }) },
     MenuItem{ "resign",     "", bind([=](){ my_app->askresign->Show(""); }) },
-    MenuItem{ "draw",       "", bind([=](){ chess_gui->chess_terminal->terminal->Send("draw"); }) },
+    MenuItem{ "draw",       "", bind([=](){ chess_gui->Send("draw"); }) },
     MenuItem{ "flip",       "", bind(&ChessGUI::FlipBoard,   chess_gui, app->focused) },
     MenuItem{ "undo",       "", bind(&ChessGUI::UndoPremove, chess_gui, app->focused) }
   });
   my_app->maintoolbar->Show(true);
 #endif
+
   chess_gui->Open(FLAGS_connect);
   return app->Main();
 }

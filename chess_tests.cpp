@@ -1,5 +1,6 @@
 #include "gtest/gtest.h"
 #include "core/app/app.h"
+#include "core/app/ipc.h"
 #include "chess.h"
 
 using namespace LFL;

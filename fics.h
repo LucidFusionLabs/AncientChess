@@ -22,14 +22,12 @@ namespace LFL {
 
 struct FICSTerminal : public ChessTerminal {
   string prompt = "fics%", filter_prompt = StrCat("\n\r", prompt, " ");
-  UnbackedTextBox local_cmd;
   NextRecordDispatcher line_buf;
   AhoCorasickFSM<char> move_fsm;
   StringMatcher<char> move_matcher;
 
   FICSTerminal(ByteSink *O, Window *W, const FontRef &F, const point &dim) :
-    ChessTerminal(O, W, F, dim), local_cmd(F), move_fsm({"\r<12> "}),
-    move_matcher(&move_fsm) {
+    ChessTerminal(O, W, F, dim), move_fsm({"\r<12> "}), move_matcher(&move_fsm) {
     move_matcher.match_end_condition = &isint<'\r'>;
     move_matcher.match_cb = bind(&FICSTerminal::FICSGameUpdateCB, this, _1);
     line_buf.cb = bind(&FICSTerminal::FICSLineCB, this, _1);
@@ -38,26 +36,6 @@ struct FICSTerminal : public ChessTerminal {
 
   virtual void Send    (const string &text) { controller->Write(StrCat(text, "\n")); }
   virtual void MakeMove(const string &move) { controller->Write(StrCat(move, "\n")); }
-  virtual void Input(char k) { local_cmd.Input(k); Terminal::Write(StringPiece(&k, 1)); }
-  virtual void Erase      () { local_cmd.Erase();  Terminal::Write(StringPiece("\x08\x1b[1P")); }
-  virtual void Enter      () {
-    string cmd = String::ToUTF8(local_cmd.cmd_line.Text16());
-    if (cmd == "console" && root && root->shell) root->shell->console(StringVec());
-    else sink->Write(StrCat(cmd, "\n"));
-    Terminal::Write(StringPiece("\r\n", 2));
-    local_cmd.AssignInput("");
-  }
-  virtual void Tab        () {}
-  virtual void Escape     () {}
-  virtual void HistUp     () {}
-  virtual void HistDown   () {}
-  virtual void CursorRight() {}
-  virtual void CursorLeft () {}
-  virtual void PageUp     () {}
-  virtual void PageDown   () {}
-  virtual void Home       () {}
-  virtual void End        () {}
-
   virtual void Write(const StringPiece &b, bool update_fb=true, bool release_fb=true) {
     if (line_buf.cb) line_buf.AddData(b);
     string s = b.str(), move_filtered;
