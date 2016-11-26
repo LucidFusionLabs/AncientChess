@@ -50,7 +50,7 @@ struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
 };
 
 struct ChessGUI : public GUI {
-  unique_ptr<ChessEngine> chess_engine;
+  unique_ptr<UniversalChessInterfaceEngine> chess_engine;
   unique_ptr<ChessTerminalTab> chess_terminal;
   point term_dim=my_app->initial_term_dim;
   v2 square_dim;
@@ -440,7 +440,7 @@ void MyWindowStart(Window *W) {
   binds->Add(Key::Right, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->WalkHistory(0); app->scheduler.Wakeup(W); })));
 
   if (FLAGS_engine.size()) {
-    chess_gui->chess_engine = make_unique<ChessEngine>();
+    chess_gui->chess_engine = make_unique<UniversalChessInterfaceEngine>();
     CHECK(chess_gui->chess_engine->Start(Asset::FileName(FLAGS_engine), W));
   }
 }

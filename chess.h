@@ -22,7 +22,7 @@ namespace LFL {
 namespace Chess {
 
 enum { WHITE=0, BLACK=1 };
-enum { ALL=0, PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6 };
+enum { ALL=0, PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6, END_PIECES=7 };
 
 enum {
   h1=0,  g1=1,  f1=2,  e1=3,  d1=4,  c1=5,  b1=6,  a1=7,
@@ -138,10 +138,36 @@ BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
   return ret;
 }
 
+}; // namespace Chess
+}; // namespace LFL
+#include "magic.h"
+namespace LFL {
+namespace Chess {
+
+struct SearchState {
+  struct Total { int nodes, captures, enpassants, castles, promotions, checks, checkmates; };
+  Total total;
+  vector<Total> depth;
+  int max_depth=0;
+};
+
+typedef unsigned Move;
+Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t flags, SearchState *count = 0, int depth = 0) {
+  if (count) {
+    count->total.nodes++;
+    if (capture) count->total.captures++;
+
+    if (depth >= count->depth.size()) count->depth.resize(depth+1);
+    count->depth[depth].nodes++;
+    if (capture) count->depth[depth].captures++;
+  }
+  return ((capture & 7) << 29) | ((piece & 7) << 26) | ((start_square & 0x3f) << 20) | ((end_square & 0x3f) << 14);
+}
+
 struct Position {
   bool move_color=WHITE, w_cant_castle=0, b_cant_castle=0, w_cant_castle_long=0, b_cant_castle_long=0;
   uint8_t previous_move_was_double_step_pawn_advance=0, fifty_move_rule_count=0;
-  BitBoard white[7], black[7], white_moves[7], black_moves[7];
+  BitBoard white[7], black[7];
   Position(const char *b) { LoadByteBoard(b); }
   Position() { Reset(); }
 
@@ -162,10 +188,8 @@ struct Position {
   }
 
   BitBoard AllPieces() const { return white[ALL] | black[ALL]; }
-  const BitBoard *Pieces(bool color) const { return color ? black       : white;       }
-  const BitBoard *Moves (bool color) const { return color ? black_moves : white_moves; }
-  /**/  BitBoard *Pieces(bool color)       { return color ? black       : white;       }
-  /**/  BitBoard *Moves (bool color)       { return color ? black_moves : white_moves; }
+  const BitBoard *Pieces(bool color) const { return color ? black : white; }
+  /**/  BitBoard *Pieces(bool color)       { return color ? black : white; }
 
   void SetAll(bool color) {
     BitBoard *pieces = Pieces(color);
@@ -194,7 +218,7 @@ struct Position {
   }
 };
 
-struct Move : public Position {
+struct GamePosition : public Position {
   int number = 0, square_from = -1, square_to = -1;
   bool capture = 0;
   string name;
@@ -203,9 +227,9 @@ struct Move : public Position {
 
 struct Game {
   string p1_name, p2_name;
-  Move position, last_position;
-  vector<Move> history;
-  deque<Move> premove;
+  GamePosition position, last_position;
+  vector<GamePosition> history;
+  deque<GamePosition> premove;
   bool active = 1, my_color = 0, flip_board = 0, engine_playing_white = 0, engine_playing_black = 0;
   int game_number = 0, history_ind = 0, p1_secs = 0, p2_secs = 0, last_p1_secs = 0, last_p2_secs = 0;
   int move_animate_from = -1, move_animate_to = -1;
@@ -235,12 +259,6 @@ struct Game {
     last_position = position;
   }
 };
-
-}; // namespace Chess
-}; // namespace LFL
-#include "magic.h"
-namespace LFL {
-namespace Chess {
 
 static BitBoard PawnMoves(const Position &in, int p, bool black) {
   BitBoard ret = black
@@ -297,13 +315,37 @@ static BitBoard PieceMoves(const Position &in, int piece, int square, bool black
   else                      FATAL("unknown piece ", piece);
 }
 
-static bool InCheck(const Position &in, bool color) {
-  return in.Moves(!color)[ALL] & in.Pieces(color)[KING];
+static bool InCheck(const Position &in, BitBoard attacks, bool color) {
+  return attacks & in.Pieces(color)[KING];
+}
+  
+vector<Move> GenerateMoves(const Position &in, bool color, SearchState *count = nullptr, int depth = 0) {
+  vector<Move> ret;
+  for (int piece_type = PAWN; piece_type != END_PIECES; ++piece_type) {
+    BitBoard pieces = in.Pieces(color)[piece_type];
+    for(; pieces; pieces &= (pieces-1)) {
+      unsigned char square_from = ffsll(pieces) - 1;
+      BitBoard piece_moves = PieceMoves(in, piece_type, square_from, color);
+      for(; piece_moves; piece_moves &= (piece_moves-1)) {
+        unsigned char square_to = ffsll(piece_moves) - 1;
+        ret.push_back(GetMove(piece_type, square_from, square_to, 0, 0, count, depth));
+      }
+    }
+  }
+  return ret;
+}
+
+void FullSearch(Position in, bool color, SearchState *count, int depth=0) {
+  vector<Chess::Move> moves = GenerateMoves(in, color, count, depth);
+  for (auto &m : moves) {
+    Position position = in;
+    if (depth+1 < count->max_depth) FullSearch(position, !color, count, depth+1);
+  }
 }
 
 }; // namespace Chess
 
-struct ChessEngine {
+struct UniversalChessInterfaceEngine {
   ProcessPipe process;
   Window *window=0;
   string readbuf;
@@ -311,8 +353,8 @@ struct ChessEngine {
   deque<IntIntCB> result_cb;
   int movesecs=0;
 
-  ChessEngine() { linebuf.cb = bind(&ChessEngine::LineCB, this, _1); }
-  virtual ~ChessEngine() { if (process.in) app->scheduler.DelMainWaitSocket(window, fileno(process.in)); }
+  UniversalChessInterfaceEngine() { linebuf.cb = bind(&UniversalChessInterfaceEngine::LineCB, this, _1); }
+  virtual ~UniversalChessInterfaceEngine() { if (process.in) app->scheduler.DelMainWaitSocket(window, fileno(process.in)); }
 
   bool Start(const string &bin, Window *w=0) {
     if (process.in) return false;
@@ -320,7 +362,7 @@ struct ChessEngine {
     if (process.Open(argv.data(), app->startdir.c_str())) return false;
     Socket fd = fileno(process.in);
     SystemNetwork::SetSocketBlocking(fd, false);
-    if ((window = w)) app->scheduler.AddMainWaitSocket(window, fd, SocketSet::READABLE, bind(&ChessEngine::ReadCB, this));
+    if ((window = w)) app->scheduler.AddMainWaitSocket(window, fd, SocketSet::READABLE, bind(&UniversalChessInterfaceEngine::ReadCB, this));
     CHECK(FWriteSuccess(process.out, "uci\nisready\n" ));
     return true;
   }
@@ -344,14 +386,14 @@ struct ChessEngine {
 
   bool ReadCB() {
     readbuf.resize(16384);
-    if (NBRead(fileno(process.in), &readbuf) < 0) { ERROR("ChessEngine::ReadCB"); Close(); return true; }
+    if (NBRead(fileno(process.in), &readbuf) < 0) { ERROR("UniversalChessInterfaceEngine::ReadCB"); Close(); return true; }
     if (readbuf.size()) { linebuf.AddData(readbuf, false); return true; }
     return false;
   }
 
   void LineCB(const StringPiece &linebuf) {
     string line = linebuf.str();
-    // INFO("ChessEngine '", line, "'");
+    // INFO("UniversalChessInterfaceEngine '", line, "'");
     if (PrefixMatch(line, "bestmove ") && line.size() >= 13) {
       if (result_cb.size()) {
         if (result_cb.front()) result_cb.front()(Chess::SquareID(line.substr(9, 2).c_str()),

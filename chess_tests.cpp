@@ -245,3 +245,21 @@ TEST(Boards, ByteBoard) {
                                "00001000\n"
                                "00000000\n"));
 }
+
+TEST(Perft, Initial) {
+  // Depth Nodes     Captures E.p. Castles Promotions Checks Checkmates
+  // 1     20        0        0    0       0          0      0
+  // 2     400       0        0    0       0          0      0
+  // 3     8902      34       0    0       0          12     0
+  // 4     197281    1576     0    0       0          469    8
+  // 5     4865609   82719    258  0       0          27351  347
+  // 6     119060324 2812008  5248 0       0          809099 10828
+  Position position;
+  SearchState search;
+  search.max_depth = 3;
+  FullSearch(position, WHITE, &search);
+  EXPECT_EQ(3, search.depth.size());
+  if (search.depth.size() > 0) EXPECT_EQ(20,   search.depth[0].nodes);
+  if (search.depth.size() > 1) EXPECT_EQ(400,  search.depth[1].nodes);
+  // if (search.depth.size() > 2) EXPECT_EQ(8902, search.depth[2].nodes);
+}
