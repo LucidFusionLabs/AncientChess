@@ -79,37 +79,44 @@ struct FICSTerminal : public ChessTerminal {
     game->active = true;
     game->game_number = game_no;
     game->update_time = Now();
-    game->position.LoadByteBoard(s);
-    game->position.square_from = game->position.square_to = -1;
-    game->position.move_color = args.size() && args[0] == "B";
+    game->history_ind = 0;
     game->p1_name = args[8];
     game->p2_name = args[9];
     game->p1_secs = atoi(args[15]);
     game->p2_secs = atoi(args[16]);
-    game->position.number = atoi(args[17]) - !game->position.move_color;
+    game->position.LoadByteBoard(s);
+    game->position.flags.to_move_color = (args.size() && args[0] == "B");
+    game->position.move_number = atoi(args[17])*2 - !game->position.flags.to_move_color - 1;
 
-    bool black = game->position.move_color;
     const string &move = args[18];
-    if (move == "none") game->position.square_from = game->position.square_to = -1;
+    int8_t piece_type, square_from, square_to;
+    bool piece_color = !game->position.flags.to_move_color;
+    bool new_move = !game->history.size() || game->history.back().move_number != game->position.move_number;
+    CHECK_EQ(piece_color, game->position.move_number % 2 == 0);
+
+    if (move == "none") piece_type = square_from = square_to = 0;
     else if (move == "o-o") {
-      if (black) { game->position.square_from = Chess::e1; game->position.square_to = Chess::g1; }
-      else       { game->position.square_from = Chess::e8; game->position.square_to = Chess::g8; }
+      piece_type = Chess::KING;
+      if (!piece_color) { square_from = Chess::e1; square_to = Chess::g1; }
+      else              { square_from = Chess::e8; square_to = Chess::g8; }
     } else if (move == "o-o-o") {
-      if (black) { game->position.square_from = Chess::e1; game->position.square_to = Chess::c1; }
-      else       { game->position.square_from = Chess::e8; game->position.square_to = Chess::c8; }
+      piece_type = Chess::KING;
+      if (!piece_color) { square_from = Chess::e1; square_to = Chess::c1; }
+      else              { square_from = Chess::e8; square_to = Chess::c8; }
     } else if (move.size() < 7 || move[1] != '/' || move[4] != '-' ||
-               (game->position.square_from = Chess::SquareID(&move[2])) == -1 ||
-               (game->position.square_to   = Chess::SquareID(&move[5])) == -1) return ERROR("Unknown move ", move);
+               !(piece_type = Chess::PieceCharType(move[0])) ||
+               (square_from = Chess::SquareID(&move[2])) == -1 ||
+               (square_to   = Chess::SquareID(&move[5])) == -1) return ERROR("Unknown move ", move);
+
     game->position.name = args[20];
-    game->position.capture = game->position.name.find("x") != string::npos;
+    if (game->position.move_number) {
+      game->position.UpdateMove(new_move, piece_type, square_from, square_to,
+                                game->position.name.find("x") != string::npos, 0);
+      if (new_move) game->AddNewMove();
+    }
 
-    game->history_ind = 0;
-    bool new_move = !game->history.size() || game->history.back().number != game->position.number ||
-      game->history.back().move_color != game->position.move_color;
-    if (new_move) game->HandleNewMove();
-
-    bool my_move_now = game->position.move_color == game->my_color;
-    if (new_move && my_move_now) game_update_cb(game, true, game->position.square_from, game->position.square_to);
+    bool my_move_now = game->position.flags.to_move_color == game->my_color;
+    if (new_move && my_move_now) game_update_cb(game, true, square_from, square_to);
     else                         game_update_cb(game, true, -1, -1);
 
     if (my_move_now && game->premove.size()) MakeMove(PopFront(game->premove).name);

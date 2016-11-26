@@ -144,15 +144,15 @@ struct ChessGUI : public GUI {
     title_changed = true;
     if (FLAGS_enable_audio) {
       static SoundAsset *move_sound = app->soundasset("move"), *capture_sound = app->soundasset("capture");
-      app->PlaySoundEffect(game->position.capture ? capture_sound : move_sound);
+      app->PlaySoundEffect(Chess::GetMoveCapture(game->position.move) ? capture_sound : move_sound);
     }
-    if (game->position.number == 0) {
+    if (game->position.move_number == 0) {
       game->my_color = my_name == game->p1_name ? Chess::WHITE : Chess::BLACK;
       game->flip_board = game->my_color == Chess::BLACK;
     }
     if (reapply_premove) ReapplyPremoves(game);
     if (animate_from != -1 && animate_to != -1 &&
-        (game->animating_piece = game->position.ClearSquare(animate_to)).second) {
+        Chess::GetPieceType((game->animating_piece = game->position.ClearSquare(animate_to)))) {
       game->move_animate_from = animate_from;
       game->move_animate_to = animate_to;
       game->move_animation_start = Now();
@@ -172,9 +172,9 @@ struct ChessGUI : public GUI {
     if (!game || !down) return;
     point p = point(x, y) - board.Position();
     int square, start_square;
-    pair<bool, int> moved_piece;
+    Chess::Piece moved_piece=0;
     if ((square = SquareFromCoords(p, game->flip_board)) < 0) return;
-    if (!game->moving_piece.second) {
+    if (!Chess::GetPieceType(game->moving_piece)) {
       drag_tracker.beg_click = drag_tracker.end_click = p;
       game->moving_piece = game->position.ClearSquare(square);
       return;
@@ -182,7 +182,7 @@ struct ChessGUI : public GUI {
     swap(game->moving_piece, moved_piece);
     game->position.SetSquare(square, moved_piece);
     if ((start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board)) == square) return;
-    MakeMove(game, moved_piece.second, start_square, square);
+    MakeMove(game, Chess::GetPieceType(moved_piece), start_square, square);
   }
 
   void DragCB(int button, int x, int y, int down) {
@@ -190,49 +190,47 @@ struct ChessGUI : public GUI {
     if (!game) return;
     point p = point(x, y) - board.Position();
     int square, start_square;
-    pair<bool, int> moved_piece;
+    Chess::Piece moved_piece=0;
     if ((square = SquareFromCoords(p, game->flip_board)) < 0) return;
     if (drag_tracker.Update(p, down)) game->moving_piece = game->position.ClearSquare(square);
-    if (!game->moving_piece.second || down) return;
+    if (!Chess::GetPieceType(game->moving_piece) || down) return;
     swap(game->moving_piece, moved_piece);
     game->position.SetSquare(square, moved_piece);
     if ((start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board)) == square) return;
-    MakeMove(game, moved_piece.second, start_square, square);
+    MakeMove(game, Chess::GetPieceType(moved_piece), start_square, square);
   }
 
   void MakeMove(Chess::Game *game, int piece, int start_square, int end_square, bool animate=false) {
     ChessTerminal *t=0;
     if ((t = chess_terminal->terminal) && t->controller) {
       string move = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
-      if (game->position.move_color == game->my_color) t->MakeMove(move);
+      if (game->position.flags.to_move_color == game->my_color) t->MakeMove(move);
       else {
         auto &pm = PushBack(game->premove, game->position);
         pm.name = move;
-        pm.square_from = start_square;
-        pm.square_to = end_square;
+        pm.move = Chess::GetMove(piece, start_square, end_square, 0, 0);
       }
     } else if (auto e = chess_engine.get()) {
-      bool move_color = game->position.move_color;
-      if (game->last_position.GetSquare(start_square).first != move_color ||
-          !(PieceMoves(game->last_position, piece, start_square, move_color) & Chess::SquareMask(end_square))) {
+      bool move_color = game->position.flags.to_move_color;
+      if (Chess::GetPieceColor(game->last_position.GetSquare(start_square)) != move_color ||
+          !(game->last_position.PieceMoves(piece, start_square, move_color) & Chess::SquareMask(end_square))) {
         IllegalMoveCB();
         game->position = game->last_position;
       } else {
-        game->active = true;
-        game->update_time = Now();
-        game->position.number++;
-        game->position.square_from = start_square;
-        game->position.square_to = end_square;
-        game->position.move_color = !move_color;
-        game->position.name = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
-        if ((game->position.capture = game->last_position.GetSquare(end_square).second))
-          game->position.ClearSquare(end_square, move_color != Chess::WHITE, move_color != Chess::BLACK);
         if (game->history.empty()) {
           my_name = game->p1_name = "Player1";
           game->p2_name = "Player2"; 
           game->history.push_back(game->last_position);
         }
-        game->HandleNewMove();
+        game->active = true;
+        game->update_time = Now();
+        game->position.move_number++;
+        game->position.flags.to_move_color = game->position.move_number % 2;
+        Chess::Piece capture = game->last_position.GetSquare(end_square);
+        if (capture) game->position.ClearSquare(end_square, move_color != Chess::WHITE, move_color != Chess::BLACK);
+        game->position.name = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
+        game->position.UpdateMove(true, piece, start_square, end_square, capture, 0);
+        game->AddNewMove();
         GameUpdateCB(game, animate, animate ? start_square : -1, animate ? end_square : -1);
       }
     }
@@ -267,17 +265,17 @@ struct ChessGUI : public GUI {
 
     if (game && (title_changed || game->active)) {
       if (game && game->active) {
-        int secs = game->position.number ? ToSeconds(now - game->update_time).count() : 0;
-        game->last_p1_secs = game->p1_secs - (game->position.move_color ? 0 : secs);
-        game->last_p2_secs = game->p2_secs - (game->position.move_color ? secs : 0);
+        int secs = game->position.move_number ? ToSeconds(now - game->update_time).count() : 0;
+        game->last_p1_secs = game->p1_secs - (game->position.flags.to_move_color ? 0 : secs);
+        game->last_p2_secs = game->p2_secs - (game->position.flags.to_move_color ? secs : 0);
       }
       string title = StringPrintf("%s %d:%02d vs %s %d:%02d",
                                  game->p1_name.c_str(), game->last_p1_secs/60, game->last_p1_secs%60,
                                  game->p2_name.c_str(), game->last_p2_secs/60, game->last_p2_secs%60);
-      if (game->position.number)
-        StringAppendf(&title, ": %d%s: %s",
-                      game->position.number, game->position.move_color ? "" : "...",
-                      game->position.name.c_str());
+      if (game->position.move_number)
+        StringAppendf(&title, ": %d%s: %s", 
+                      (game->position.move_number + game->position.flags.to_move_color)/2,
+                      game->position.flags.to_move_color ? "" : "...", game->position.name.c_str());
 
       W->SetCaption(title);
       title_changed = false;
@@ -306,26 +304,27 @@ struct ChessGUI : public GUI {
       Bit::Indices(game->position.black[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(W->gd, black_font_index[i],   SquareCoords(*b, game->flip_board));
     }
 
-    if (game->position.square_from != -1 && game->position.square_to != -1) {
-      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(&gc, SquareCoords(game->position.square_from, game->flip_board));
-      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(&gc, SquareCoords(game->position.square_to,   game->flip_board));
+    if (game->position.move_number) {
+      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveFromSquare(game->position.move), game->flip_board));
+      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveToSquare  (game->position.move), game->flip_board));
     }
 
     for (auto &pm : game->premove) {
-      W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(&gc, SquareCoords(pm.square_from, game->flip_board));
-      W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(&gc, SquareCoords(pm.square_to,   game->flip_board));
+      W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveFromSquare(pm.move), game->flip_board));
+      W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveToSquare  (pm.move), game->flip_board));
     }
 
-    if (game->moving_piece.second) {
+    if (auto piece_type = Chess::GetPieceType(game->moving_piece)) {
+      bool piece_color = Chess::GetPieceColor(game->moving_piece);
       int start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board);
-      Chess::BitBoard moves = PieceMoves(game->position, game->moving_piece.second, start_square, game->moving_piece.first);
+      Chess::BitBoard moves = game->position.PieceMoves(piece_type, start_square, piece_color);
       Bit::Indices(moves, bits);
       W->gd->SetColor(Color(255, 85, 255));
       for (int *b = bits; *b != -1; b++)   BoxOutline().Draw(&gc, SquareCoords(*b, game->flip_board));
       W->gd->SetColor(Color(170, 0, 170)); BoxOutline().Draw(&gc, SquareCoords(start_square, game->flip_board));
       W->gd->SetColor(Color::white);
 
-      int glyph_index = black_font_index[game->moving_piece.second] + 6*(!game->moving_piece.first);
+      int glyph_index = black_font_index[piece_type] + 6*(!piece_color);
       pieces->DrawGlyph(W->gd, glyph_index, SquareCoords(start_square, game->flip_board) + (drag_tracker.end_click - drag_tracker.beg_click));
     } else W->gd->SetColor(Color::white);
 
@@ -335,7 +334,8 @@ struct ChessGUI : public GUI {
         game->move_animate_from = -1;
         UpdateAnimating(W);
       } 
-      int glyph_index = black_font_index[game->animating_piece.second] + 6*(!game->animating_piece.first);
+      int glyph_index = black_font_index[Chess::GetPieceType(game->animating_piece)] +
+        6*(!Chess::GetPieceColor(game->animating_piece));
       Box start_square = SquareCoords(game->move_animate_from, game->flip_board);
       Box end_square   = SquareCoords(game->move_animate_to,   game->flip_board);
       float percent = min(1.0f, float((now - game->move_animation_start).count()) / move_animation_time.count());
@@ -354,17 +354,17 @@ struct ChessGUI : public GUI {
     if (game->history_ind == last_history_ind) return;
     game->position = game->history[game->history.size()-1-game->history_ind];
 
-    if (!backwards) GameUpdateCB(game, !game->history_ind, game->position.square_from, game->position.square_to);
+    if (!backwards) GameUpdateCB(game, !game->history_ind, Chess::GetMoveFromSquare(game->position.move), Chess::GetMoveToSquare(game->position.move));
     else if (Clamp<int>(last_history_ind, 0, game->history.size()-1) == last_history_ind) {
       auto &last_position = game->history[game->history.size()-1-last_history_ind];
-      GameUpdateCB(game, !game->history_ind, last_position.square_to, last_position.square_from);
+      GameUpdateCB(game, !game->history_ind, Chess::GetMoveToSquare(last_position.move), Chess::GetMoveFromSquare(last_position.move));
     }
   }
 
   void ReapplyPremoves(Chess::Game *game) {
     for (auto &pm : game->premove) {
-      auto pm_piece = game->position.ClearSquare(pm.square_from);
-      game->position.SetSquare(pm.square_to, pm_piece);
+      auto pm_piece = game->position.ClearSquare(Chess::GetMoveFromSquare(pm.move));
+      game->position.SetSquare(Chess::GetMoveToSquare(pm.move), pm_piece);
       pm.Assign(game->position);
     }
   }
@@ -395,16 +395,16 @@ struct ChessGUI : public GUI {
   void StartEngine(bool black_or_white) {
     bool started = false;
     Chess::Game *game = Top();
-    if (!chess_engine || game->position.move_color != black_or_white) return;
+    if (!chess_engine || game->position.flags.to_move_color != black_or_white) return;
     if (black_or_white) started = Changed(&game->engine_playing_black, true);
     else                started = Changed(&game->engine_playing_white, true);
     // if (!started) return;
     chess_engine->Analyze(game, [=](int square_from, int square_to){
       game->position = game->last_position;                    
       auto piece = game->position.ClearSquare(square_from);
-      if (piece.second) {
+      if (auto piece_type = Chess::GetPieceType(piece)) {
         game->position.SetSquare(square_to, piece);
-        MakeMove(game, piece.second, square_from, square_to, true);
+        MakeMove(game, piece_type, square_from, square_to, true);
       }
       // INFO("bestmove ", Chess::SquareName(square_from), " ", Chess::SquareName(square_to));
     });

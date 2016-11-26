@@ -153,122 +153,18 @@ static BitBoard black_pawn_attack_mask[] = {
   0x2000000000000LL, 0x5000000000000LL, 0xa000000000000LL, 0x14000000000000LL, 0x28000000000000LL, 0x50000000000000LL, 0xa0000000000000LL, 0x40000000000000LL
 };
 
-int MagicHash(BitBoard occupancy, BitBoard magic_number, int magic_number_bits) {
-  return int((occupancy * magic_number) >> (64 - magic_number_bits));
-} 
-
-int MagicHash(int p, BitBoard occupancy, const BitBoard *magic_number, const int *magic_number_bits) {
-  return MagicHash(occupancy, magic_number[p], magic_number_bits[p]);
-}
-
-void GenerateRookOccupancyVariations(int p, vector<BitBoard> *occupancy_variation, vector<BitBoard> *attack_set=0) {
-  BitBoard mask = rook_occupancy_mask[p];
-  int bit_count=Bit::Count(mask), variation_count=1<<bit_count, mask_bit_indices[65], i_bit_indices[65], j;
-  Bit::Indices(mask, mask_bit_indices);
-
-  for (int i=0; i<variation_count; i++) {
-    BitBoard occupancy=0, attack=0;
-    Bit::Indices(i, i_bit_indices);
-    for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1LL << mask_bit_indices[i_bit_indices[j]]);
-
-    for (j=p+8; j<=55                    && (occupancy & (1LL<<j)) == 0; j+=8) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-    for (j=p-8; j>=8                     && (occupancy & (1LL<<j)) == 0; j-=8) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-    for (j=p+1; j%8!=7 && j%8!=0         && (occupancy & (1LL<<j)) == 0; j++)  {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-    for (j=p-1; j%8!=7 && j%8!=0 && j>=0 && (occupancy & (1LL<<j)) == 0; j--)  {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-
-    occupancy_variation->push_back(occupancy);
-    if (attack_set) attack_set->push_back(attack);
-  }
-}
-
-void GenerateBishopOccupancyVariations(int p, vector<BitBoard> *occupancy_variation, vector<BitBoard> *attack_set=0) {
-  BitBoard mask = bishop_occupancy_mask[p];
-  int bit_count=Bit::Count(mask), variation_count=1<<bit_count, mask_bit_indices[65], i_bit_indices[65], j;
-  Bit::Indices(mask, mask_bit_indices);
-
-  for (int i=0; i<variation_count; i++) {
-    BitBoard occupancy=0, attack=0;
-    Bit::Indices(i, i_bit_indices);
-    for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1LL << mask_bit_indices[i_bit_indices[j]]);
-
-    for (j=p+9; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1LL<<j)) == 0; j+=9) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-    for (j=p-9; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1LL<<j)) == 0; j-=9) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-    for (j=p+7; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1LL<<j)) == 0; j+=7) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-    for (j=p-7; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1LL<<j)) == 0; j-=7) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
-
-    occupancy_variation->push_back(occupancy);
-    if (attack_set) attack_set->push_back(attack);
-  }
-}
-
-void GenerateRookMagicMoves(int p, const vector<BitBoard> &occupancy_variation, vector<BitBoard> *magic_moves) {
-  magic_moves->resize(1 << rook_magic_number_bits[p]);
-  for (int i=0, j; i<occupancy_variation.size(); i++) {
-    int magic_index = MagicHash(p, occupancy_variation[i], rook_magic_number, rook_magic_number_bits);
-    BitBoard valid_moves = 0;
-
-    for (j=p+8; j<=63;         j+=8) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-    for (j=p-8; j>= 0;         j-=8) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-    for (j=p+1; j%8!=0;         j++) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-    for (j=p-1; j%8!=7 && j>=0; j--) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-
-    CHECK_RANGE(magic_index, 0, magic_moves->size());
-    (*magic_moves)[magic_index] = valid_moves;
-  }
-}
-
-void GenerateBishopMagicMoves(int p, const vector<BitBoard> &occupancy_variation, vector<BitBoard> *magic_moves) {
-  magic_moves->resize(1 << bishop_magic_number_bits[p]);
-  for (int i=0, j; i<occupancy_variation.size(); i++) {
-    int magic_index = MagicHash(p, occupancy_variation[i], bishop_magic_number, bishop_magic_number_bits);
-    BitBoard valid_moves = 0;
-
-    for (j=p+9; j%8!=0 && j<=63; j+=9) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-    for (j=p-9; j%8!=7 && j>= 0; j-=9) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-    for (j=p+7; j%8!=7 && j<=63; j+=7) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-    for (j=p-7; j%8!=0 && j>= 0; j-=7) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
-
-    CHECK_RANGE(magic_index, 0, magic_moves->size());
-    (*magic_moves)[magic_index] = valid_moves;
-  }
-}
-
-void GenerateMagicNumbers(int p, const BitBoard *occupancyMask, const vector<BitBoard> &occupancy_variation, const vector<BitBoard> &attack_set,
-                          BitBoard *magic_number_out, int *magic_number_bits_out)
-{
-  int bit_count=Bit::Count(occupancyMask[p]), variation_count=int(1LL << bit_count);
-  vector<BitBoard> used_by(int(1LL << bit_count), 0);
-  BitBoard magic_number;
-
-  bool fail=0;
-  for (int attempts=0; /**/; ++attempts, fail=0) {
-    magic_number = Rand64() & Rand64() & Rand64();
-
-    for (int i=0;          i<variation_count; i++) used_by[i] = 0;
-    for (int i=0; !fail && i<variation_count; i++) {
-      int magic_index = MagicHash(occupancy_variation[i], magic_number, bit_count);
-      fail = used_by[magic_index] != 0 && used_by[magic_index] != attack_set[i];
-      used_by[magic_index] = attack_set[i];
-    }
-  } 
-  while (fail);
-
-  *magic_number_out = magic_number;
-  *magic_number_bits_out = bit_count;
-}
-
 struct MagicMoves {
   vector<BitBoard> rook_magic_moves[64], bishop_magic_moves[64];
   MagicMoves() {
     for (int i=0; i<64; i++) {
       vector<BitBoard> occupancy_variation;
-      GenerateRookOccupancyVariations(i, &occupancy_variation);
-      GenerateRookMagicMoves(i, occupancy_variation, &rook_magic_moves[i]);
+      GetRookOccupancyVariations(i, &occupancy_variation);
+      SetupRookMagicMoves(i, occupancy_variation, &rook_magic_moves[i]);
     }
     for (int i=0; i<64; i++) {
       vector<BitBoard> occupancy_variation;
-      GenerateBishopOccupancyVariations(i, &occupancy_variation);
-      GenerateBishopMagicMoves(i, occupancy_variation, &bishop_magic_moves[i]);
+      GetBishopOccupancyVariations(i, &occupancy_variation);
+      SetupBishopMagicMoves(i, occupancy_variation, &bishop_magic_moves[i]);
     }
   }
 
@@ -284,6 +180,86 @@ struct MagicMoves {
     int magic_index = MagicHash(p, blockers, bishop_magic_number, bishop_magic_number_bits);
     CHECK_RANGE(magic_index, 0, bishop_magic_moves[p].size());
     return bishop_magic_moves[p][magic_index] & ~friendly;
+  }
+
+  static int MagicHash(BitBoard occupancy, BitBoard magic_number, int magic_number_bits) {
+    return int((occupancy * magic_number) >> (64 - magic_number_bits));
+  } 
+
+  static int MagicHash(int p, BitBoard occupancy, const BitBoard *magic_number, const int *magic_number_bits) {
+    return MagicHash(occupancy, magic_number[p], magic_number_bits[p]);
+  }
+
+  static void GetRookOccupancyVariations(int p, vector<BitBoard> *occupancy_variation, vector<BitBoard> *attack_set=0) {
+    BitBoard mask = rook_occupancy_mask[p];
+    int bit_count=Bit::Count(mask), variation_count=1<<bit_count, mask_bit_indices[65], i_bit_indices[65], j;
+    Bit::Indices(mask, mask_bit_indices);
+
+    for (int i=0; i<variation_count; i++) {
+      BitBoard occupancy=0, attack=0;
+      Bit::Indices(i, i_bit_indices);
+      for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1LL << mask_bit_indices[i_bit_indices[j]]);
+
+      for (j=p+8; j<=55                    && (occupancy & (1LL<<j)) == 0; j+=8) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+      for (j=p-8; j>=8                     && (occupancy & (1LL<<j)) == 0; j-=8) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+      for (j=p+1; j%8!=7 && j%8!=0         && (occupancy & (1LL<<j)) == 0; j++)  {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+      for (j=p-1; j%8!=7 && j%8!=0 && j>=0 && (occupancy & (1LL<<j)) == 0; j--)  {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+
+      occupancy_variation->push_back(occupancy);
+      if (attack_set) attack_set->push_back(attack);
+    }
+  }
+
+  static void GetBishopOccupancyVariations(int p, vector<BitBoard> *occupancy_variation, vector<BitBoard> *attack_set=0) {
+    BitBoard mask = bishop_occupancy_mask[p];
+    int bit_count=Bit::Count(mask), variation_count=1<<bit_count, mask_bit_indices[65], i_bit_indices[65], j;
+    Bit::Indices(mask, mask_bit_indices);
+
+    for (int i=0; i<variation_count; i++) {
+      BitBoard occupancy=0, attack=0;
+      Bit::Indices(i, i_bit_indices);
+      for (j=0; i_bit_indices[j] != -1; j++) occupancy |= (1LL << mask_bit_indices[i_bit_indices[j]]);
+
+      for (j=p+9; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1LL<<j)) == 0; j+=9) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+      for (j=p-9; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1LL<<j)) == 0; j-=9) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+      for (j=p+7; j%8!=7 && j%8!=0 && j<=55 && (occupancy & (1LL<<j)) == 0; j+=7) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+      for (j=p-7; j%8!=7 && j%8!=0 && j>= 8 && (occupancy & (1LL<<j)) == 0; j-=7) {}; if (j>=0 && j<=63) attack |= (1LL<<j);
+
+      occupancy_variation->push_back(occupancy);
+      if (attack_set) attack_set->push_back(attack);
+    }
+  }
+
+  static void SetupRookMagicMoves(int p, const vector<BitBoard> &occupancy_variation, vector<BitBoard> *magic_moves) {
+    magic_moves->resize(1 << rook_magic_number_bits[p]);
+    for (int i=0, j; i<occupancy_variation.size(); i++) {
+      int magic_index = MagicHash(p, occupancy_variation[i], rook_magic_number, rook_magic_number_bits);
+      BitBoard valid_moves = 0;
+
+      for (j=p+8; j<=63;         j+=8) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+      for (j=p-8; j>= 0;         j-=8) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+      for (j=p+1; j%8!=0;         j++) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+      for (j=p-1; j%8!=7 && j>=0; j--) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+
+      CHECK_RANGE(magic_index, 0, magic_moves->size());
+      (*magic_moves)[magic_index] = valid_moves;
+    }
+  }
+
+  static void SetupBishopMagicMoves(int p, const vector<BitBoard> &occupancy_variation, vector<BitBoard> *magic_moves) {
+    magic_moves->resize(1 << bishop_magic_number_bits[p]);
+    for (int i=0, j; i<occupancy_variation.size(); i++) {
+      int magic_index = MagicHash(p, occupancy_variation[i], bishop_magic_number, bishop_magic_number_bits);
+      BitBoard valid_moves = 0;
+
+      for (j=p+9; j%8!=0 && j<=63; j+=9) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+      for (j=p-9; j%8!=7 && j>= 0; j-=9) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+      for (j=p+7; j%8!=7 && j<=63; j+=7) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+      for (j=p-7; j%8!=0 && j>= 0; j-=7) { valid_moves |= (1LL<<j); if ((occupancy_variation[i] & (1LL<<j)) != 0) break; }
+
+      CHECK_RANGE(magic_index, 0, magic_moves->size());
+      (*magic_moves)[magic_index] = valid_moves;
+    }
   }
 };
 

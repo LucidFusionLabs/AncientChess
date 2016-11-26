@@ -208,7 +208,7 @@ TEST(AttackMaskTest, BlackPawn) {
   }
 }
 
-TEST(Boards, ByteBoard) {
+TEST(BoardTest, ByteBoard) {
   for (int i=0; i<64; i++) {
     EXPECT_EQ(  rook_occupancy_mask[i], BitBoardFromString(BitBoardToString(  rook_occupancy_mask[i]).c_str()));
     EXPECT_EQ(bishop_occupancy_mask[i], BitBoardFromString(BitBoardToString(bishop_occupancy_mask[i]).c_str()));
@@ -228,14 +228,14 @@ TEST(Boards, ByteBoard) {
   EXPECT_EQ(black_initial[Chess::QUEEN],  ByteBoardToBitBoard(initial_byte_board, 'q'));
   EXPECT_EQ(black_initial[Chess::KING],   ByteBoardToBitBoard(initial_byte_board, 'k'));
 
-  EXPECT_EQ(Chess::QueenMoves(Chess::Position("--------\n"
-                                              "-kp-----\n"
-                                              "-pp-n---\n"
-                                              "p---qp--\n"
-                                              "--------\n"
-                                              "--PP--P-\n"
-                                              "PPK-NQ--\n"
-                                              "--------\n"), Chess::e5, Chess::BLACK),
+  EXPECT_EQ(Chess::Position("--------\n"
+                            "-kp-----\n"                   
+                            "-pp-n---\n"                   
+                            "p---qp--\n"                   
+                            "--------\n"                   
+                            "--PP--P-\n"                   
+                            "PPK-NQ--\n"                   
+                            "--------\n").QueenMoves(Chess::e5, Chess::BLACK),
             BitBoardFromString("00000001\n"
                                "00000010\n"
                                "00010100\n"
@@ -246,7 +246,19 @@ TEST(Boards, ByteBoard) {
                                "00000000\n"));
 }
 
-TEST(Perft, Initial) {
+TEST(MoveTest, Encoding) {
+  for (int i=0; i<128; i++) {
+    uint8_t from_square = Rand(0, 64-1), to_square = Rand(0, 64-1);
+    uint8_t piece = Rand(0, int(END_PIECES)-1), capture = Rand(0, int(END_PIECES)-1);
+    Chess::Move move = GetMove(piece, from_square, to_square, capture, 0);
+    EXPECT_EQ(piece,       GetMovePieceType(move));
+    EXPECT_EQ(from_square, GetMoveFromSquare(move));
+    EXPECT_EQ(to_square,   GetMoveToSquare(move));
+    EXPECT_EQ(capture,     GetMoveCapture(move));
+  }
+}
+
+TEST(Perft, InitialPosition) {
   // Depth Nodes     Captures E.p. Castles Promotions Checks Checkmates
   // 1     20        0        0    0       0          0      0
   // 2     400       0        0    0       0          0      0
@@ -259,7 +271,7 @@ TEST(Perft, Initial) {
   search.max_depth = 3;
   FullSearch(position, WHITE, &search);
   EXPECT_EQ(3, search.depth.size());
-  if (search.depth.size() > 0) EXPECT_EQ(20,   search.depth[0].nodes);
-  if (search.depth.size() > 1) EXPECT_EQ(400,  search.depth[1].nodes);
-  // if (search.depth.size() > 2) EXPECT_EQ(8902, search.depth[2].nodes);
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(20,   d->nodes); EXPECT_EQ(0,  d->captures); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(400,  d->nodes); EXPECT_EQ(0,  d->captures); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(8902, d->nodes); EXPECT_EQ(34, d->captures); }
 }
