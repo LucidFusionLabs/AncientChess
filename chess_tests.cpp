@@ -249,12 +249,13 @@ TEST(BoardTest, ByteBoard) {
 TEST(MoveTest, Encoding) {
   for (int i=0; i<128; i++) {
     uint8_t from_square = Rand(0, 64-1), to_square = Rand(0, 64-1);
-    uint8_t piece = Rand(0, int(END_PIECES)-1), capture = Rand(0, int(END_PIECES)-1);
-    Chess::Move move = GetMove(piece, from_square, to_square, capture, 0);
+    uint8_t piece = Rand(0, int(END_PIECES)-1), capture = Rand(0, int(END_PIECES)-1), promote = Rand(0, int(END_PIECES)-1);
+    Chess::Move move = GetMove(piece, from_square, to_square, capture, promote, 0);
     EXPECT_EQ(piece,       GetMovePieceType(move));
     EXPECT_EQ(from_square, GetMoveFromSquare(move));
     EXPECT_EQ(to_square,   GetMoveToSquare(move));
     EXPECT_EQ(capture,     GetMoveCapture(move));
+    EXPECT_EQ(promote,     GetMovePromotion(move));
   }
 }
 
@@ -268,13 +269,14 @@ TEST(Perft, InitialPosition) {
   // 6     119060324 2812008  5248 0       0          809099 10828
   Position position;
   SearchState search;
-  search.max_depth = 5;
+  search.max_depth = 6;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(5, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(20,      d->nodes); EXPECT_EQ(0,     d->captures); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(400,     d->nodes); EXPECT_EQ(0,     d->captures); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(8902,    d->nodes); EXPECT_EQ(34,    d->captures); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(197281,  d->nodes); EXPECT_EQ(1576,  d->captures); }
-  // if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(4865609, d->nodes); EXPECT_EQ(82719, d->captures); }
+  EXPECT_EQ(6, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(20,        d->nodes); EXPECT_EQ(0,       d->captures); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(400,       d->nodes); EXPECT_EQ(0,       d->captures); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(8902,      d->nodes); EXPECT_EQ(34,      d->captures); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(197281,    d->nodes); EXPECT_EQ(1576,    d->captures); }
+  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(4865609,   d->nodes); EXPECT_EQ(82719,   d->captures); }
+  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(119060324, d->nodes); EXPECT_EQ(2812008, d->captures); }
   // for (auto &d : search.divide) INFO(SquareName(GetMoveFromSquare(d.first)), SquareName(GetMoveToSquare(d.first)), " ", d.second.nodes);
 }

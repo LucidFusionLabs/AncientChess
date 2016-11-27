@@ -54,7 +54,6 @@ struct ChessGUI : public GUI {
   unique_ptr<ChessTerminalTab> chess_terminal;
   point term_dim=my_app->initial_term_dim;
   v2 square_dim;
-  string my_name;
   Box win, board, term;
   Widget::Divider divider;
   Chess::Game *top_game=0;
@@ -93,7 +92,7 @@ struct ChessGUI : public GUI {
     t->controller      = chess_terminal->controller.get();
     t->get_game_cb     = [=](int game_no){ return &game_map[game_no]; };
     t->illegal_move_cb = bind(&ChessGUI::IllegalMoveCB, this);
-    t->login_cb        = bind(&ChessGUI::LoginCB,       this, _1);
+    t->login_cb        = bind(&ChessGUI::LoginCB,       this);
     t->game_start_cb   = bind(&ChessGUI::GameStartCB,   this, _1);
     t->game_over_cb    = bind(&ChessGUI::GameOverCB,    this, _1, _2, _3, _4);
     t->game_update_cb  = bind(&ChessGUI::GameUpdateCB,  this, _1, _2, _3, _4);
@@ -116,7 +115,7 @@ struct ChessGUI : public GUI {
   }
 
   void ClosedCB() { chess_terminal->terminal->Write("\r\nConnection closed.\r\n"); }
-  void LoginCB(const string &n) { root->SetCaption(StrCat((my_name = n), " @ ", FLAGS_connect)); }
+  void LoginCB() { root->SetCaption(StrCat(chess_terminal->terminal->my_name, " @ ", FLAGS_connect)); }
 
   void GameStartCB(int game_no) {
     Chess::Game *game = top_game = &game_map[game_no];
@@ -131,6 +130,7 @@ struct ChessGUI : public GUI {
   }
 
   void GameOverCB(int game_no, const string &p1, const string &p2, const string &result) {
+    const string &my_name = chess_terminal->terminal->my_name;
     bool lose = (my_name == p1 && result == "0-1") || (my_name == p2 && result == "1-0");
     if (FLAGS_enable_audio) {
       static SoundAsset *win_sound = app->soundasset("win"), *lose_sound = app->soundasset("lose");
@@ -147,7 +147,7 @@ struct ChessGUI : public GUI {
       app->PlaySoundEffect(Chess::GetMoveCapture(game->position.move) ? capture_sound : move_sound);
     }
     if (game->position.move_number == 0) {
-      game->my_color = my_name == game->p1_name ? Chess::WHITE : Chess::BLACK;
+      game->my_color = chess_terminal->terminal->my_name == game->p1_name ? Chess::WHITE : Chess::BLACK;
       game->flip_board = game->my_color == Chess::BLACK;
     }
     if (reapply_premove) ReapplyPremoves(game);
@@ -208,7 +208,7 @@ struct ChessGUI : public GUI {
       else {
         auto &pm = PushBack(game->premove, game->position);
         pm.name = move;
-        pm.move = Chess::GetMove(piece, start_square, end_square, 0, 0);
+        pm.move = Chess::GetMove(piece, start_square, end_square, 0, 0, 0);
       }
     } else if (auto e = chess_engine.get()) {
       bool move_color = game->position.flags.to_move_color;
@@ -218,7 +218,7 @@ struct ChessGUI : public GUI {
         game->position = game->last_position;
       } else {
         if (game->history.empty()) {
-          my_name = game->p1_name = "Player1";
+          chess_terminal->terminal->my_name = game->p1_name = "Player1";
           game->p2_name = "Player2"; 
           game->history.push_back(game->last_position);
         }
@@ -226,10 +226,13 @@ struct ChessGUI : public GUI {
         game->update_time = Now();
         game->position.move_number++;
         game->position.flags.to_move_color = game->position.move_number % 2;
-        Chess::Piece capture = game->last_position.GetSquare(end_square);
-        if (capture) game->position.ClearSquare(end_square, move_color != Chess::WHITE, move_color != Chess::BLACK);
+        bool en_passant = piece == Chess::PAWN && Chess::SquareX(start_square) != Chess::SquareX(end_square) &&
+          !Chess::GetPieceType(game->last_position.GetSquare(end_square));
+        uint8_t capture_square = en_passant ? (end_square + 8 * (move_color ? 1 : -1)) : end_square;
+        Chess::Piece capture = game->last_position.GetSquare(capture_square);
+        if (capture) game->position.ClearSquare(capture_square, move_color != Chess::WHITE, move_color != Chess::BLACK);
         game->position.name = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
-        game->position.UpdateMove(true, piece, start_square, end_square, capture, 0);
+        game->position.UpdateMove(true, piece, start_square, end_square, capture, 0, en_passant ? Chess::MoveFlag::EnPassant : 0);
         game->AddNewMove();
         GameUpdateCB(game, animate, animate ? start_square : -1, animate ? end_square : -1);
       }

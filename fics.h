@@ -47,7 +47,8 @@ struct FICSTerminal : public ChessTerminal {
 
   virtual void FICSLoginCB(const string &s) {
     controller->Write("\nset seek 0\nset style 12\n");
-    login_cb(s.substr(0, s.find("(")));
+    my_name = s.substr(0, s.find("("));
+    login_cb();
   }
 
   virtual void FICSLineCB(const string &l) {
@@ -110,14 +111,16 @@ struct FICSTerminal : public ChessTerminal {
 
     game->position.name = args[20];
     if (game->position.move_number) {
+      uint8_t promotion = move.size() >= 2 && move[move.size()-2] == '=' ? Chess::PieceCharType(move.back()) : 0;
       game->position.UpdateMove(new_move, piece_type, square_from, square_to,
-                                game->position.name.find("x") != string::npos, 0);
+                                game->position.name.find("x") != string::npos, promotion, 0);
       if (new_move) game->AddNewMove();
     }
 
+    bool my_game = game->p1_name == my_name || game->p2_name == my_name;
     bool my_move_now = game->position.flags.to_move_color == game->my_color;
-    if (new_move && my_move_now) game_update_cb(game, true, square_from, square_to);
-    else                         game_update_cb(game, true, -1, -1);
+    if (new_move && (!my_game || my_move_now)) game_update_cb(game, true, square_from, square_to);
+    else                                       game_update_cb(game, true, -1, -1);
 
     if (my_move_now && game->premove.size()) MakeMove(PopFront(game->premove).name);
   }

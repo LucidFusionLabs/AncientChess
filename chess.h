@@ -36,6 +36,7 @@ enum { h1=0,  g1=1,  f1=2,  e1=3,  d1=4,  c1=5,  b1=6,  a1=7,
        h6=40, g6=41, f6=42, e6=43, d6=44, c6=45, b6=46, a6=47,
        h7=48, g7=49, f7=50, e7=51, d7=52, c7=53, b7=54, a7=55,
        h8=56, g8=57, f8=58, e8=59, d8=60, c8=61, b8=62, a8=63 };
+struct MoveFlag { enum { Castle=1, CastleLong=2, Check=4, Checkmate=8, DoubleStepPawn=16, EnPassant=32 }; };
 
 //                                      { 0, pawns,         knights,     bishops,     rooks,       queen,       king       };
 static const BitBoard white_initial[] = { 0, 0xff00ULL,     0x42ULL,     0x24ULL,     0x81ULL,     0x10ULL,     0x8ULL     };
@@ -96,13 +97,15 @@ inline Piece GetPiece(bool color, uint8_t piece) {
   return (uint8_t(color) << 3) | (piece & 7);
 }
 
-inline uint8_t GetMovePieceType (Move move) { return (move >> 26) & 0x7; }
-inline uint8_t GetMoveFromSquare(Move move) { return (move >> 20) & 0x3f; }
-inline uint8_t GetMoveToSquare  (Move move) { return (move >> 14) & 0x3f; }
-inline uint8_t GetMoveCapture   (Move move) { return (move >> 29) & 0x7; }
-inline Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t flags) {
-  return ((capture & 7) << 29) | ((piece & 7) << 26) | ((start_square & 0x3f) << 20) |
-    ((end_square & 0x3f) << 14);
+inline uint8_t GetMovePieceType (Move move) { return (move >> 23) & 0x7; }
+inline uint8_t GetMoveFromSquare(Move move) { return (move >> 17) & 0x3f; }
+inline uint8_t GetMoveToSquare  (Move move) { return (move >> 11) & 0x3f; }
+inline uint8_t GetMoveCapture   (Move move) { return (move >> 26) & 0x7; }
+inline uint8_t GetMovePromotion (Move move) { return (move >> 29) & 0x7; }
+
+inline Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t promote, uint8_t flags) {
+  return ((promote & 7) << 29) | ((capture & 7) << 26) | ((piece & 7) << 23) | ((start_square & 0x3f) << 17) |
+    ((end_square & 0x3f) << 11) | flags;
 }
 
 inline int8_t SquareX(int s) { return 7 - (s % 8); }
@@ -187,7 +190,7 @@ namespace Chess {
 
 struct PositionFlags {
   uint8_t fifty_move_rule_count:6, to_move_color:1, w_cant_castle:1, b_cant_castle:1,
-          w_cant_castle_long:1, b_cant_castle_long:1, previous_move_was_double_step_pawn_advance:1;
+          w_cant_castle_long:1, b_cant_castle_long:1;
 };
 
 struct Position {
@@ -217,14 +220,15 @@ struct Position {
     SetAll(BLACK);
   }
 
-  void UpdateMove(bool new_move, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured, uint8_t move_flags) {
-    bool piece_color = move_number % 2 == 0;
-    CHECK_EQ(GetPiece(piece_color, piece_type), GetSquare(square_to));
-    move = Chess::GetMove(piece_type, square_from, square_to, captured, move_flags);
+  void UpdateMove(bool new_move, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured,
+                  uint8_t promotion, uint8_t move_flags) {
+    bool piece_color = (move_number % 2) == 0;
+    if (piece_type == PAWN && abs(SquareY(square_to) - SquareY(square_from)) == 2)
+      move_flags |= MoveFlag::DoubleStepPawn;
+    CHECK_EQ(GetPiece(piece_color, promotion ? promotion : piece_type), GetSquare(square_to));
+    move = Chess::GetMove(piece_type, square_from, square_to, captured, promotion, move_flags);
     if (!new_move) return;
 
-    if (piece_type == PAWN && abs(SquareY(square_to) - SquareY(square_from)) == 2)
-      flags.previous_move_was_double_step_pawn_advance = square_to;
     if (piece_color == WHITE) {
       if      (square_from == e1) flags.w_cant_castle = flags.w_cant_castle_long = true;
       else if (square_from == h1) flags.w_cant_castle = true;
@@ -270,11 +274,12 @@ struct Position {
   }
   
   BitBoard PawnEnPassant(int p, bool black) const {
-    if (!flags.previous_move_was_double_step_pawn_advance ||
-        SquareY(flags.previous_move_was_double_step_pawn_advance) != SquareY(p)) return 0;
-    if      (flags.previous_move_was_double_step_pawn_advance + 1 == p) return SquareMask(black ? p-9 : p+7);
-    else if (flags.previous_move_was_double_step_pawn_advance - 1 == p) return SquareMask(black ? p-7 : p+9);
-    else                                                                return 0;
+    uint8_t square_to;
+    if (!(move & MoveFlag::DoubleStepPawn) ||
+        SquareY((square_to = GetMoveToSquare(move))) != SquareY(p)) return 0;
+    if      (square_to + 1 == p) return SquareMask(black ? p-9 : p+7);
+    else if (square_to - 1 == p) return SquareMask(black ? p-7 : p+9);
+    else                         return 0;
   }
 
   BitBoard PawnAttacks(int p, bool black) const {
@@ -391,13 +396,17 @@ vector<Position> GenerateMoves(const Position &in, bool color) {
         ret.emplace_back(in);
         square_to = m.GetTargetSquare();
         Position &position = ret.back();
-        Piece piece          = position.ClearSquare(square_from, color == WHITE, color == BLACK);
-        Piece captured_piece = position.ClearSquare(square_to,   color != WHITE, color != BLACK);
-        int captured_piece_type = GetPieceType(captured_piece);
+        bool en_passant = piece_type == PAWN && SquareX(square_from) != SquareX(square_to) &&
+          (in.move & MoveFlag::DoubleStepPawn) && (GetMoveToSquare(in.move) == (square_to + 8 * (color ? 1 : -1)));
+
+        uint8_t capture_square = en_passant ? (square_to + 8 * (color ? 1 : -1)) : square_to;
+        Piece piece          = position.ClearSquare(square_from,    color == WHITE, color == BLACK);
+        Piece captured_piece = position.ClearSquare(capture_square, color != WHITE, color != BLACK);
+        uint8_t captured_piece_type = GetPieceType(captured_piece);
         position.move_number++;
         position.flags.to_move_color = !color;
         position.SetSquare(square_to, piece);
-        position.UpdateMove(true, piece, square_from, square_to, captured_piece_type, 0);
+        position.UpdateMove(true, GetPieceType(piece), square_from, square_to, captured_piece_type, 0, en_passant ? MoveFlag::EnPassant : 0);
         if (position.InCheck(position.AllAttacks(!color), color)) ret.pop_back();
       }
   return ret;
@@ -407,7 +416,7 @@ void FullSearch(Position in, bool color, SearchState *count, int depth=0, Search
   auto moves = GenerateMoves(in, color);
   for (auto &m : moves) {
     unsigned char move_from = GetMoveFromSquare(m.move), move_to = GetMoveToSquare(m.move);
-    if (!depth) divide = &count->divide[GetMove(GetMovePieceType(m.move), move_from, move_to, 0, 0)];
+    if (!depth) divide = &count->divide[GetMove(GetMovePieceType(m.move), move_from, move_to, 0, 0, 0)];
     if (count) count->CountMove(depth, GetMoveCapture(m.move), divide);
     // INFO(string(depth*4, ' '), SquareName(move_from), "-", SquareName(move_to));
     if (depth+1 >= count->max_depth) continue;
@@ -504,9 +513,9 @@ struct ChessTerminal : public Terminal {
   Terminal::Controller *controller=0;
   function<Chess::Game*(int)> get_game_cb;
   UnbackedTextBox local_cmd;
+  string my_name;
 
-  StringCB login_cb;
-  Callback illegal_move_cb;
+  Callback login_cb, illegal_move_cb;
   function<void(int)> game_start_cb;
   function<void(int, const string&, const string&, const string&)> game_over_cb;
   function<void(Chess::Game*, bool, int, int)> game_update_cb;
