@@ -268,10 +268,13 @@ TEST(Perft, InitialPosition) {
   // 6     119060324 2812008  5248 0       0          809099 10828
   Position position;
   SearchState search;
-  search.max_depth = 3;
+  search.max_depth = 5;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(3, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(20,   d->nodes); EXPECT_EQ(0,  d->captures); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(400,  d->nodes); EXPECT_EQ(0,  d->captures); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(8902, d->nodes); EXPECT_EQ(34, d->captures); }
+  EXPECT_EQ(5, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(20,      d->nodes); EXPECT_EQ(0,     d->captures); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(400,     d->nodes); EXPECT_EQ(0,     d->captures); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(8902,    d->nodes); EXPECT_EQ(34,    d->captures); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(197281,  d->nodes); EXPECT_EQ(1576,  d->captures); }
+  // if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(4865609, d->nodes); EXPECT_EQ(82719, d->captures); }
+  // for (auto &d : search.divide) INFO(SquareName(GetMoveFromSquare(d.first)), SquareName(GetMoveToSquare(d.first)), " ", d.second.nodes);
 }

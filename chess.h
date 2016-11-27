@@ -163,6 +163,22 @@ BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
   return ret;
 }
 
+struct PieceIter { 
+  BitBoard pieces;
+  PieceIter(BitBoard v) : pieces(v) {}
+  uint8_t GetSquare() const { return ffsll(pieces) - 1; }
+  operator bool() const { return pieces; }
+  PieceIter& operator++() { pieces &= (pieces-1); return *this; }
+};
+
+struct MoveIter { 
+  BitBoard moves;
+  MoveIter(BitBoard v) : moves(v) {}
+  uint8_t GetTargetSquare() const { return ffsll(moves) - 1; }
+  operator bool() const { return moves; }
+  MoveIter& operator++() { moves &= (moves-1); return *this; }
+};
+
 }; // namespace Chess
 }; // namespace LFL
 #include "magic.h"
@@ -252,17 +268,30 @@ struct Position {
     if (clear_black) for (int i=PAWN; i!=END_PIECES; i++) if (black[i] & mask) { black[0] &= ~mask; black[i] &= ~mask; return GetPiece(BLACK, i); }
     return GetPiece(WHITE, 0);
   }
+  
+  BitBoard PawnEnPassant(int p, bool black) const {
+    if (!flags.previous_move_was_double_step_pawn_advance ||
+        SquareY(flags.previous_move_was_double_step_pawn_advance) != SquareY(p)) return 0;
+    if      (flags.previous_move_was_double_step_pawn_advance + 1 == p) return SquareMask(black ? p-9 : p+7);
+    else if (flags.previous_move_was_double_step_pawn_advance - 1 == p) return SquareMask(black ? p-7 : p+9);
+    else                                                                return 0;
+  }
+
+  BitBoard PawnAttacks(int p, bool black) const {
+    return black ? (black_pawn_attack_mask[p] & Pieces(!black)[ALL])
+                 : (white_pawn_attack_mask[p] & Pieces(!black)[ALL]);
+  }
+
+  BitBoard PawnAdvances(int p, bool black) const {
+    BitBoard ret = black ? (black_pawn_occupancy_mask[p] & ~AllPieces())
+                         : (white_pawn_occupancy_mask[p] & ~AllPieces());
+    if (black) { if (SquareY(p) == 6) ret &= ((ret >> 8) | 0xffffff00ffffffffLL); }
+    else       { if (SquareY(p) == 1) ret &= ((ret << 8) | 0xffffffff00ffffffLL); }
+    return ret;
+  }
 
   BitBoard PawnMoves(int p, bool black) const {
-    BitBoard ret = black
-      ? ((black_pawn_occupancy_mask[p] & ~AllPieces()) | (black_pawn_attack_mask[p] & Pieces(!black)[ALL]))
-      : ((white_pawn_occupancy_mask[p] & ~AllPieces()) | (white_pawn_attack_mask[p] & Pieces(!black)[ALL]));
-    if (flags.previous_move_was_double_step_pawn_advance &&
-        SquareY(flags.previous_move_was_double_step_pawn_advance) == SquareY(p)) {
-      if      (flags.previous_move_was_double_step_pawn_advance + 1 == p) ret |= SquareMask(black ? p-9 : p+7);
-      else if (flags.previous_move_was_double_step_pawn_advance - 1 == p) ret |= SquareMask(black ? p-7 : p+9);
-    }
-    return ret;
+    return PawnAdvances(p, black) | PawnAttacks(p, black) | PawnEnPassant(p, black);
   }
 
   BitBoard KnightMoves(int p, bool black) const {
@@ -308,6 +337,24 @@ struct Position {
     else                      FATAL("unknown piece ", piece);
   }
 
+  BitBoard PieceAttacks(int piece, int square, bool black) const {
+    if      (piece == PAWN)   return PawnAttacks(square, black) | PawnEnPassant(square, black);
+    else if (piece == KNIGHT) return KnightMoves(square, black);
+    else if (piece == BISHOP) return BishopMoves(square, black);
+    else if (piece == ROOK)   return RookMoves  (square, black);
+    else if (piece == QUEEN)  return QueenMoves (square, black);
+    else if (piece == KING)   return KingMoves  (square, black);
+    else                      FATAL("unknown piece ", piece);
+  }
+
+  BitBoard AllAttacks(bool color) const {
+    BitBoard ret = 0;
+    for (int piece_type = PAWN; piece_type != END_PIECES; ++piece_type)
+      for (PieceIter p(Pieces(color)[piece_type]); p; ++p)
+        ret |= PieceAttacks(piece_type, p.GetSquare(), color);
+    return ret;
+  }
+
   bool InCheck(BitBoard attacks, bool color) const {
     return attacks & Pieces(color)[KING];
   }
@@ -317,46 +364,54 @@ struct SearchState {
   struct Total { int nodes, captures, enpassants, castles, promotions, checks, checkmates; };
   Total total;
   vector<Total> depth;
+  unordered_map<Move, Total> divide;
   int max_depth=0;
 
-  void CountMove(int di, bool capture) {
+  void CountMove(int di, bool capture, Total *divide=0) {
     total.nodes++;
     if (capture) total.captures++;
+
+    if (divide && di+1 == max_depth) {
+      divide->nodes++;
+      if (capture) divide->captures++;
+    }
     if (di >= depth.size()) depth.resize(di+1);
+
     depth[di].nodes++;
     if (capture) depth[di].captures++;
   }
 };
- 
-vector<Move> GenerateMoves(const Position &in, bool color) {
-  vector<Move> ret;
-  for (int piece_type = PAWN; piece_type != END_PIECES; ++piece_type) {
-    BitBoard pieces = in.Pieces(color)[piece_type];
-    for(; pieces; pieces &= (pieces-1)) {
-      unsigned char square_from = ffsll(pieces) - 1;
-      BitBoard piece_moves = in.PieceMoves(piece_type, square_from, color);
-      for(; piece_moves; piece_moves &= (piece_moves-1)) {
-        unsigned char square_to = ffsll(piece_moves) - 1;
-        ret.push_back(GetMove(piece_type, square_from, square_to, 0, 0));
+
+vector<Position> GenerateMoves(const Position &in, bool color) {
+  vector<Position> ret;
+  uint8_t square_from, square_to;
+  for (int piece_type = PAWN; piece_type != END_PIECES; ++piece_type)
+    for (PieceIter p(in.Pieces(color)[piece_type]); p; ++p)
+      for (MoveIter m(in.PieceMoves(piece_type, (square_from = p.GetSquare()), color)); m; ++m) {
+        ret.emplace_back(in);
+        square_to = m.GetTargetSquare();
+        Position &position = ret.back();
+        Piece piece          = position.ClearSquare(square_from, color == WHITE, color == BLACK);
+        Piece captured_piece = position.ClearSquare(square_to,   color != WHITE, color != BLACK);
+        int captured_piece_type = GetPieceType(captured_piece);
+        position.move_number++;
+        position.flags.to_move_color = !color;
+        position.SetSquare(square_to, piece);
+        position.UpdateMove(true, piece, square_from, square_to, captured_piece_type, 0);
+        if (position.InCheck(position.AllAttacks(!color), color)) ret.pop_back();
       }
-    }
-  }
   return ret;
 }
 
-void FullSearch(Position in, bool color, SearchState *count, int depth=0) {
-  vector<Chess::Move> moves = GenerateMoves(in, color);
+void FullSearch(Position in, bool color, SearchState *count, int depth=0, SearchState::Total *divide=0) {
+  auto moves = GenerateMoves(in, color);
   for (auto &m : moves) {
-    Position position = in;
-    unsigned char move_from = GetMoveFromSquare(m), move_to = GetMoveToSquare(m);
-    Piece piece = position.ClearSquare(move_from, color == WHITE, color == BLACK);
-    CHECK_EQ(GetPiece(color, GetMovePieceType(m)), piece);
-    Piece captured_piece = position.ClearSquare(move_to, color != WHITE, color != BLACK);
-    if (count) count->CountMove(depth, GetPieceType(captured_piece));
-
+    unsigned char move_from = GetMoveFromSquare(m.move), move_to = GetMoveToSquare(m.move);
+    if (!depth) divide = &count->divide[GetMove(GetMovePieceType(m.move), move_from, move_to, 0, 0)];
+    if (count) count->CountMove(depth, GetMoveCapture(m.move), divide);
+    // INFO(string(depth*4, ' '), SquareName(move_from), "-", SquareName(move_to));
     if (depth+1 >= count->max_depth) continue;
-    position.SetSquare(move_to, piece);
-    FullSearch(position, !color, count, depth+1);
+    FullSearch(m, !color, count, depth+1, divide);
   }
 }
 
