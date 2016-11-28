@@ -166,10 +166,10 @@ TEST(OccupancyMaskTest, King) {
     if (p%8 != 7 && p-7 >= 0) mask |= (1ULL<<(p-7));
     EXPECT_EQ(king_occupancy_mask[p], mask);
   }
-  EXPECT_EQ(SquareMask(f1) | SquareMask(g1),                  white_castle_path);
-  EXPECT_EQ(SquareMask(b1) | SquareMask(c1) | SquareMask(d1), white_castle_long_path);
-  EXPECT_EQ(SquareMask(f8) | SquareMask(g8),                  black_castle_path);
-  EXPECT_EQ(SquareMask(b8) | SquareMask(c8) | SquareMask(d8), black_castle_long_path);
+  EXPECT_EQ(SquareMask(f1) | SquareMask(g1), white_castle_path);
+  EXPECT_EQ(SquareMask(c1) | SquareMask(d1), white_castle_long_path);
+  EXPECT_EQ(SquareMask(f8) | SquareMask(g8), black_castle_path);
+  EXPECT_EQ(SquareMask(c8) | SquareMask(d8), black_castle_long_path);
 }
 
 TEST(OccupancyMaskTest, WhitePawn) {
@@ -228,14 +228,14 @@ TEST(BoardTest, ByteBoard) {
   EXPECT_EQ(black_initial[Chess::QUEEN],  ByteBoardToBitBoard(initial_byte_board, 'q'));
   EXPECT_EQ(black_initial[Chess::KING],   ByteBoardToBitBoard(initial_byte_board, 'k'));
 
-  EXPECT_EQ(Chess::Position("--------\n"
-                            "-kp-----\n"                   
-                            "-pp-n---\n"                   
-                            "p---qp--\n"                   
-                            "--------\n"                   
-                            "--PP--P-\n"                   
-                            "PPK-NQ--\n"                   
-                            "--------\n").QueenMoves(Chess::e5, Chess::BLACK),
+  EXPECT_EQ(Chess::Position::FromByteBoard("--------\n"
+                                           "-kp-----\n"                   
+                                           "-pp-n---\n"                   
+                                           "p---qp--\n"                   
+                                           "--------\n"                   
+                                           "--PP--P-\n"                   
+                                           "PPK-NQ--\n"                   
+                                           "--------\n").QueenMoves(Chess::e5, Chess::BLACK),
             BitBoardFromString("00000001\n"
                                "00000010\n"
                                "00010100\n"
@@ -244,6 +244,74 @@ TEST(BoardTest, ByteBoard) {
                                "00101010\n"
                                "00001000\n"
                                "00000000\n"));
+}
+
+TEST(BoardTest, ForsythEdwardsNotation) {
+  Chess::Position initial, position;
+  EXPECT_EQ(true, position.LoadFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"));
+  EXPECT_EQ(initial_byte_board, position.GetByteBoard());
+  EXPECT_EQ(WHITE, position.flags.to_move_color);
+  EXPECT_EQ(0, position.flags.w_cant_castle_long);
+  EXPECT_EQ(0, position.flags.b_cant_castle_long);
+  EXPECT_EQ(0, position.flags.w_cant_castle);
+  EXPECT_EQ(0, position.flags.b_cant_castle);
+  EXPECT_EQ(0, position.flags.fifty_move_rule_count);
+  EXPECT_EQ(0, position.move_number);
+
+  EXPECT_EQ(true, position.LoadFEN("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -"));
+  EXPECT_EQ(kiwipete_byte_board, position.GetByteBoard());
+  EXPECT_EQ(WHITE, position.flags.to_move_color);
+  EXPECT_EQ(0, position.flags.w_cant_castle_long);
+  EXPECT_EQ(0, position.flags.b_cant_castle_long);
+  EXPECT_EQ(0, position.flags.w_cant_castle);
+  EXPECT_EQ(0, position.flags.b_cant_castle);
+  EXPECT_EQ(0, position.flags.fifty_move_rule_count);
+  EXPECT_EQ(0, position.move_number);
+
+  EXPECT_EQ(true, position.LoadFEN(perft_pos3_fen));
+  EXPECT_EQ(WHITE, position.flags.to_move_color);
+  EXPECT_EQ(1, position.flags.w_cant_castle_long);
+  EXPECT_EQ(1, position.flags.b_cant_castle_long);
+  EXPECT_EQ(1, position.flags.w_cant_castle);
+  EXPECT_EQ(1, position.flags.b_cant_castle);
+  EXPECT_EQ(0, position.flags.fifty_move_rule_count);
+  EXPECT_EQ(0, position.move_number);
+
+  EXPECT_EQ(true, position.LoadFEN(perft_pos4_fen));
+  EXPECT_EQ(WHITE, position.flags.to_move_color);
+  EXPECT_EQ(1, position.flags.w_cant_castle_long);
+  EXPECT_EQ(0, position.flags.b_cant_castle_long);
+  EXPECT_EQ(1, position.flags.w_cant_castle);
+  EXPECT_EQ(0, position.flags.b_cant_castle);
+  EXPECT_EQ(0, position.flags.fifty_move_rule_count);
+  EXPECT_EQ(0, position.move_number);
+
+  EXPECT_EQ(true, position.LoadFEN(perft_pos4_mirror_fen));
+  EXPECT_EQ(BLACK, position.flags.to_move_color);
+  EXPECT_EQ(0, position.flags.w_cant_castle_long);
+  EXPECT_EQ(1, position.flags.b_cant_castle_long);
+  EXPECT_EQ(0, position.flags.w_cant_castle);
+  EXPECT_EQ(1, position.flags.b_cant_castle);
+  EXPECT_EQ(0, position.flags.fifty_move_rule_count);
+  EXPECT_EQ(1, position.move_number);
+
+  EXPECT_EQ(true, position.LoadFEN(perft_pos5_fen));
+  EXPECT_EQ(WHITE, position.flags.to_move_color);
+  EXPECT_EQ(0, position.flags.w_cant_castle_long);
+  EXPECT_EQ(1, position.flags.b_cant_castle_long);
+  EXPECT_EQ(0, position.flags.w_cant_castle);
+  EXPECT_EQ(1, position.flags.b_cant_castle);
+  EXPECT_EQ(1, position.flags.fifty_move_rule_count);
+  EXPECT_EQ(14, position.move_number);
+
+  EXPECT_EQ(true, position.LoadFEN(perft_pos6_fen));
+  EXPECT_EQ(WHITE, position.flags.to_move_color);
+  EXPECT_EQ(1, position.flags.w_cant_castle_long);
+  EXPECT_EQ(1, position.flags.b_cant_castle_long);
+  EXPECT_EQ(1, position.flags.w_cant_castle);
+  EXPECT_EQ(1, position.flags.b_cant_castle);
+  EXPECT_EQ(0, position.flags.fifty_move_rule_count);
+  EXPECT_EQ(18, position.move_number);
 }
 
 TEST(MoveTest, Encoding) {
@@ -259,6 +327,8 @@ TEST(MoveTest, Encoding) {
   }
 }
 
+#define CHESS_PERFT_TESTS
+#ifdef  CHESS_PERFT_TESTS
 TEST(Perft, InitialPosition) {
   // Depth Nodes     Captures E.p. Castles Promotions Checks Checkmates
   // 1     20        0        0    0       0          0      0
@@ -278,5 +348,125 @@ TEST(Perft, InitialPosition) {
   if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(197281,    d->nodes); EXPECT_EQ(1576,    d->captures); }
   if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(4865609,   d->nodes); EXPECT_EQ(82719,   d->captures); }
   if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(119060324, d->nodes); EXPECT_EQ(2812008, d->captures); }
-  // for (auto &d : search.divide) INFO(SquareName(GetMoveFromSquare(d.first)), SquareName(GetMoveToSquare(d.first)), " ", d.second.nodes);
 }
+
+TEST(Perft, Kiwipete) {
+  // Depth Nodes     Captures E.p.  Castles Promotions Checks  Checkmates
+  // 1     48        8        0     2       0          0       0
+  // 2     2039      351      1     91      0          3       0
+  // 3     97862     17102    45    3162    0          993     1
+  // 4     4085603   757163   1929  128013  15172      25523   43
+  // 5     193690690 35043416 73365 4993637 8392       3309887 30171
+  Position position = Position::FromByteBoard(kiwipete_byte_board);
+  SearchState search;
+  search.max_depth = 5;
+  FullSearch(position, WHITE, &search);
+  EXPECT_EQ(5, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(48,        d->nodes); EXPECT_EQ(8,        d->captures); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(2039,      d->nodes); EXPECT_EQ(351,      d->captures); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(97862,     d->nodes); EXPECT_EQ(17102,    d->captures); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(4085603,   d->nodes); EXPECT_EQ(757163,   d->captures); }
+  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(193690690, d->nodes); EXPECT_EQ(35043416, d->captures); }
+  //for (auto &d : search.divide) INFO(SquareName(GetMoveFromSquare(d.first)), SquareName(GetMoveToSquare(d.first)), ": ", d.second.nodes);
+}
+
+TEST(Perft, Position3) {
+  // Depth Nodes     Captures E.p.   Castles Promotions Checks   Checkmates
+  // 1     14        1        0      0       0          2        0
+  // 2     191       14       0      0       0          10       0
+  // 3     2812      209      2      0       0          267      0
+  // 4     43238     3348     123    0       0          1680     17
+  // 5     674624    52051    1165   0       0          52950    0
+  // 6     11030083  940350   33325  0       7552       452473   2733
+  // 7     178633661 14519036 294874 0       140024     12797406 87
+  Position position(perft_pos3_fen);
+  SearchState search;
+  search.max_depth = 7;
+  FullSearch(position, WHITE, &search);
+  EXPECT_EQ(7, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(14,        d->nodes); EXPECT_EQ(1,        d->captures); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(191,       d->nodes); EXPECT_EQ(14,       d->captures); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(2812,      d->nodes); EXPECT_EQ(209,      d->captures); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(43238,     d->nodes); EXPECT_EQ(3348,     d->captures); }
+  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(674624,    d->nodes); EXPECT_EQ(52051,    d->captures); }
+  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(11030083,  d->nodes); EXPECT_EQ(940350,   d->captures); }
+  if (auto d = VectorGet(search.depth, 6)) { EXPECT_EQ(178633661, d->nodes); EXPECT_EQ(14519036, d->captures); }
+}
+
+TEST(Perft, Position4) {
+  // Depth Nodes     Captures  E.p. Castles  Promotions Checks   Checkmates
+  // 1     6         0         0    0        0          0        0
+  // 2     264       87        0    6        48         10       0
+  // 3     9467      1021      4    0        120        38       22
+  // 4     422333    131393    0    7795     60032      15492    5
+  // 5     15833292  2046173   6512 0        329464     200568   50562
+  // 6     706045033 210369132 212  10882006 81102984   26973664 81076
+  Position position(perft_pos4_fen);
+  SearchState search;
+  search.max_depth = 6;
+  FullSearch(position, WHITE, &search);
+  EXPECT_EQ(6, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(6,         d->nodes); EXPECT_EQ(0,         d->captures); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(264,       d->nodes); EXPECT_EQ(87,        d->captures); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(9467,      d->nodes); EXPECT_EQ(1021,      d->captures); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(422333,    d->nodes); EXPECT_EQ(131393 ,   d->captures); }
+  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(15833292,  d->nodes); EXPECT_EQ(2046173,   d->captures); }
+  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(706045033, d->nodes); EXPECT_EQ(210369132, d->captures); }
+}
+
+TEST(Perft, Position4Mirror) {
+  Position position(perft_pos4_mirror_fen);
+  SearchState search;
+  search.max_depth = 6;
+  FullSearch(position, BLACK, &search);
+  EXPECT_EQ(6, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(6,         d->nodes); EXPECT_EQ(0,         d->captures); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(264,       d->nodes); EXPECT_EQ(87,        d->captures); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(9467,      d->nodes); EXPECT_EQ(1021,      d->captures); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(422333,    d->nodes); EXPECT_EQ(131393 ,   d->captures); }
+  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(15833292,  d->nodes); EXPECT_EQ(2046173,   d->captures); }
+  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(706045033, d->nodes); EXPECT_EQ(210369132, d->captures); }
+}
+
+TEST(Perft, Position5) {
+  // Depth Nodes
+  // 1     44
+  // 2     1486
+  // 3     62379
+  // 4     2103487
+  // 5     89941194
+  Position position(perft_pos5_fen);
+  SearchState search;
+  search.max_depth = 5;
+  FullSearch(position, WHITE, &search);
+  EXPECT_EQ(5, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(44,       d->nodes); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(1486,     d->nodes); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(62379,    d->nodes); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(2103487,  d->nodes); }
+  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(89941194, d->nodes); }
+}
+
+TEST(Perft, Position6) {
+  // Depth Nodes
+  // 1     46
+  // 2     2079
+  // 3     89890
+  // 4     3894594
+  // 5     164075551
+  // 6     6923051137
+  // 7     287188994746
+  // 8     11923589843526
+  // 9     490154852788714
+  Position position(perft_pos6_fen);
+  SearchState search;
+  search.max_depth = 5;
+  FullSearch(position, WHITE, &search);
+  EXPECT_EQ(5, search.depth.size());
+  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(46,        d->nodes); }
+  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(2079,      d->nodes); }
+  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(89890,     d->nodes); }
+  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(3894594,   d->nodes); }
+  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(164075551, d->nodes); }
+}
+#endif // CHESS_PERFT_TESTS

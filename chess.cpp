@@ -105,6 +105,14 @@ struct ChessGUI : public GUI {
     else if (auto e = chess_engine.get()) {}
   }
 
+  void LoadPosition(const vector<string> &arg) {
+    auto g = Top();
+    if (!g || arg.size() != 1) return;
+    if      (arg[0] == "kiwipete")  g->last_position.LoadByteBoard(Chess::kiwipete_byte_board);
+    else if (arg[0] == "perftpos3") g->last_position.LoadFEN      (Chess::perft_pos3_fen);
+    g->position = g->last_position;
+  }
+
   void ListGames() { for (auto &i : game_map) INFO(i.first, " ", i.second.p1_name, " vs ", i.second.p2_name); }
   void FlipBoard(Window *w) { if (auto g = Top()) g->flip_board = !g->flip_board; app->scheduler.Wakeup(w); }
   void UpdateAnimating(Window *w) { app->scheduler.SetAnimating(w, (Top() && Top()->move_animate_from != -1) | console_animating); }
@@ -213,7 +221,8 @@ struct ChessGUI : public GUI {
     } else if (auto e = chess_engine.get()) {
       bool move_color = game->position.flags.to_move_color;
       if (Chess::GetPieceColor(game->last_position.GetSquare(start_square)) != move_color ||
-          !(game->last_position.PieceMoves(piece, start_square, move_color) & Chess::SquareMask(end_square))) {
+          !(Chess::SquareMask(end_square) & game->last_position.PieceMoves
+            (piece, start_square, move_color, game->last_position.AllAttacks(!move_color)))) {
         IllegalMoveCB();
         game->position = game->last_position;
       } else {
@@ -228,11 +237,18 @@ struct ChessGUI : public GUI {
         game->position.flags.to_move_color = game->position.move_number % 2;
         bool en_passant = piece == Chess::PAWN && Chess::SquareX(start_square) != Chess::SquareX(end_square) &&
           !Chess::GetPieceType(game->last_position.GetSquare(end_square));
-        uint8_t capture_square = en_passant ? (end_square + 8 * (move_color ? 1 : -1)) : end_square;
+        uint8_t capture_square = en_passant ? (end_square + 8 * (move_color ? 1 : -1)) : end_square, promotion = 0;
         Chess::Piece capture = game->last_position.GetSquare(capture_square);
         if (capture) game->position.ClearSquare(capture_square, move_color != Chess::WHITE, move_color != Chess::BLACK);
+        if (piece == Chess::KING && abs(Chess::SquareX(end_square) - Chess::SquareX(start_square)) > 1) 
+          game->position.UpdateCastles(move_color, end_square);
+        if (piece == Chess::PAWN && Chess::SquareY(end_square) == (move_color ? 0 : 7)) {
+          promotion = Chess::QUEEN;
+          game->position.ClearSquare(end_square, move_color == Chess::WHITE, move_color == Chess::BLACK);
+          game->position.SetSquare(end_square, Chess::GetPiece(move_color, promotion));
+        }
         game->position.name = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
-        game->position.UpdateMove(true, piece, start_square, end_square, capture, 0, en_passant ? Chess::MoveFlag::EnPassant : 0);
+        game->position.UpdateMove(true, piece, start_square, end_square, capture, promotion, en_passant ? Chess::MoveFlag::EnPassant : 0);
         game->AddNewMove();
         GameUpdateCB(game, animate, animate ? start_square : -1, animate ? end_square : -1);
       }
@@ -320,7 +336,7 @@ struct ChessGUI : public GUI {
     if (auto piece_type = Chess::GetPieceType(game->moving_piece)) {
       bool piece_color = Chess::GetPieceColor(game->moving_piece);
       int start_square = SquareFromCoords(drag_tracker.beg_click, game->flip_board);
-      Chess::BitBoard moves = game->position.PieceMoves(piece_type, start_square, piece_color);
+      Chess::BitBoard moves = game->position.PieceMoves(piece_type, start_square, piece_color, game->position.AllAttacks(!piece_color));
       Bit::Indices(moves, bits);
       W->gd->SetColor(Color(255, 85, 255));
       for (int *b = bits; *b != -1; b++)   BoxOutline().Draw(&gc, SquareCoords(*b, game->flip_board));
@@ -432,7 +448,8 @@ void MyWindowStart(Window *W) {
   if (FLAGS_console) W->console->animating_cb = bind(&ChessGUI::ConsoleAnimatingCB, chess_gui);
 
   W->shell = make_unique<Shell>(W);
-  W->shell->Add("games", bind(&ChessGUI::ListGames, chess_gui));
+  W->shell->Add("games", bind(&ChessGUI::ListGames,    chess_gui));
+  W->shell->Add("load",  bind(&ChessGUI::LoadPosition, chess_gui, _1));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
