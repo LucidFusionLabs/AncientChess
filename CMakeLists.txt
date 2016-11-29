@@ -21,6 +21,15 @@ lfl_post_build_start(chess chess LChess)
 add_dependencies(chess ${CHESS_DEP})
 
 if(NOT LFL_MOBILE)
+  lfl_add_target(lengine EXECUTABLE SOURCES engine.cpp
+                 LINK_LIBRARIES ${LFL_APP_LIB} app_null_framework app_null_graphics
+                 app_null_audio app_null_camera app_null_matrix app_null_fft
+                 app_simple_resampler app_simple_loader ${LFL_APP_CONVERT}
+                 app_null_png app_null_jpeg app_null_gif app_null_ogg app_null_css ${LFL_APP_FONT}
+                 app_null_ssl app_null_js app_null_tu app_null_toolkit ${LFL_APP_OS})
+  add_dependencies(lengine chess)
+  lfl_post_build_copy_asset_bin(lengine lengine LChess)
+
   lfl_add_target(chess_tests EXECUTABLE SOURCES chess_tests.cpp
                  INCLUDE_DIRECTORIES ${GTEST_INCLUDE}
                  LINK_LIBRARIES ${LFL_APP_LIB} ${GTEST_LIB} app_null_framework app_null_graphics
@@ -29,7 +38,7 @@ if(NOT LFL_MOBILE)
                  app_null_png app_null_jpeg app_null_gif app_null_ogg app_null_css ${LFL_APP_FONT}
                  app_null_ssl app_null_js app_null_tu app_null_toolkit ${LFL_APP_OS})
 
-  if(0)
+  if(CHESS_MAGICGEN)
     lfl_add_target(magicgen EXECUTABLE SOURCES magicgen.cpp
                    LINK_LIBRARIES ${LFL_APP_LIB} app_null_framework app_null_graphics
                    app_null_audio app_null_camera app_null_matrix app_null_fft

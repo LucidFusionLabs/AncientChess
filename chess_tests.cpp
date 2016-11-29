@@ -247,9 +247,11 @@ TEST(BoardTest, ByteBoard) {
 }
 
 TEST(BoardTest, ForsythEdwardsNotation) {
+  string initial_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   Chess::Position initial, position;
-  EXPECT_EQ(true, position.LoadFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"));
+  EXPECT_EQ(true, position.LoadFEN(initial_fen));
   EXPECT_EQ(initial_byte_board, position.GetByteBoard());
+  EXPECT_EQ(initial_fen, position.GetFEN()); 
   EXPECT_EQ(WHITE, position.flags.to_move_color);
   EXPECT_EQ(0, position.flags.w_cant_castle_long);
   EXPECT_EQ(0, position.flags.b_cant_castle_long);
@@ -278,6 +280,7 @@ TEST(BoardTest, ForsythEdwardsNotation) {
   EXPECT_EQ(0, position.move_number);
 
   EXPECT_EQ(true, position.LoadFEN(perft_pos4_fen));
+  EXPECT_EQ(perft_pos4_fen, position.GetFEN()); 
   EXPECT_EQ(WHITE, position.flags.to_move_color);
   EXPECT_EQ(1, position.flags.w_cant_castle_long);
   EXPECT_EQ(0, position.flags.b_cant_castle_long);
@@ -287,6 +290,7 @@ TEST(BoardTest, ForsythEdwardsNotation) {
   EXPECT_EQ(0, position.move_number);
 
   EXPECT_EQ(true, position.LoadFEN(perft_pos4_mirror_fen));
+  EXPECT_EQ(perft_pos4_mirror_fen, position.GetFEN()); 
   EXPECT_EQ(BLACK, position.flags.to_move_color);
   EXPECT_EQ(0, position.flags.w_cant_castle_long);
   EXPECT_EQ(1, position.flags.b_cant_castle_long);
@@ -296,6 +300,7 @@ TEST(BoardTest, ForsythEdwardsNotation) {
   EXPECT_EQ(1, position.move_number);
 
   EXPECT_EQ(true, position.LoadFEN(perft_pos5_fen));
+  EXPECT_EQ(perft_pos5_fen, position.GetFEN()); 
   EXPECT_EQ(WHITE, position.flags.to_move_color);
   EXPECT_EQ(0, position.flags.w_cant_castle_long);
   EXPECT_EQ(1, position.flags.b_cant_castle_long);
@@ -305,6 +310,7 @@ TEST(BoardTest, ForsythEdwardsNotation) {
   EXPECT_EQ(14, position.move_number);
 
   EXPECT_EQ(true, position.LoadFEN(perft_pos6_fen));
+  EXPECT_EQ(perft_pos6_fen, position.GetFEN()); 
   EXPECT_EQ(WHITE, position.flags.to_move_color);
   EXPECT_EQ(1, position.flags.w_cant_castle_long);
   EXPECT_EQ(1, position.flags.b_cant_castle_long);

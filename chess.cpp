@@ -107,9 +107,11 @@ struct ChessGUI : public GUI {
 
   void LoadPosition(const vector<string> &arg) {
     auto g = Top();
-    if (!g || arg.size() != 1) return;
-    if      (arg[0] == "kiwipete")  g->last_position.LoadByteBoard(Chess::kiwipete_byte_board);
-    else if (arg[0] == "perftpos3") g->last_position.LoadFEN      (Chess::perft_pos3_fen);
+    if (!g || !arg.size()) return;
+    if (arg.size() == 1) {
+      if      (arg[0] == "kiwipete")  g->last_position.LoadByteBoard(Chess::kiwipete_byte_board);
+      else if (arg[0] == "perftpos3") g->last_position.LoadFEN      (Chess::perft_pos3_fen);
+    } else if (g->last_position.LoadFEN(Join(arg, " "))) {}
     g->position = g->last_position;
   }
 
@@ -229,7 +231,6 @@ struct ChessGUI : public GUI {
         if (game->history.empty()) {
           chess_terminal->terminal->my_name = game->p1_name = "Player1";
           game->p2_name = "Player2"; 
-          game->history.push_back(game->last_position);
         }
         game->active = true;
         game->update_time = Now();
@@ -293,8 +294,8 @@ struct ChessGUI : public GUI {
                                  game->p2_name.c_str(), game->last_p2_secs/60, game->last_p2_secs%60);
       if (game->position.move_number)
         StringAppendf(&title, ": %d%s: %s", 
-                      (game->position.move_number + game->position.flags.to_move_color)/2,
-                      game->position.flags.to_move_color ? "" : "...", game->position.name.c_str());
+                      game->position.StandardMoveNumber(),
+                      game->position.StandardMoveSuffix(), game->position.name.c_str());
 
       W->SetCaption(title);
       title_changed = false;
