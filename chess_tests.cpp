@@ -475,4 +475,30 @@ TEST(Perft, Position6) {
   if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(3894594,   d->nodes); }
   if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(164075551, d->nodes); }
 }
+
+TEST(Perft, PerftSuite) {
+  unique_ptr<File> testfile(Asset::OpenFile("perftsuite.epd"));
+  if (!testfile) { EXPECT_TRUE(false); return; }
+  FileLineIter tests(testfile.get());
+  Chess::Position position;
+  vector<string> arg;
+  int count=0;
+  for (const char *line = tests.Next(); line; line = tests.Next()) {
+    Split(StringPiece(line, tests.CurrentLength()), isint<';'>, nullptr, &arg);
+    if (arg.size() < 2) { EXPECT_TRUE(false); continue; }
+    if (!position.LoadFEN(arg[0])) { EXPECT_TRUE(false); continue; }
+    vector<int> depth;
+    for (int i=1, l=arg.size(); i != l; ++i) {
+      EXPECT_TRUE(PrefixMatch(arg[i], StrCat("D", i, " ")));
+      depth.push_back(LFL::atoi(arg[i].data() + 3));
+    }
+    INFO("PerftSuite[", ++count, "]: depth=", depth.size(), " ", position.GetFEN());
+    SearchState search;
+    search.max_depth = depth.size();
+    FullSearch(position, position.flags.to_move_color, &search);
+    if (depth.size() != search.depth.size()) { EXPECT_TRUE(false); continue; }
+    for (int i=0, l=depth.size(); i != l; ++i) { EXPECT_EQ(depth[i], search.depth[i].nodes); }
+  }
+}
+
 #endif // CHESS_PERFT_TESTS

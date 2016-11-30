@@ -37,6 +37,7 @@ if(NOT LFL_MOBILE)
                  app_simple_resampler app_simple_loader ${LFL_APP_CONVERT}
                  app_null_png app_null_jpeg app_null_gif app_null_ogg app_null_css ${LFL_APP_FONT}
                  app_null_ssl app_null_js app_null_tu app_null_toolkit ${LFL_APP_OS})
+  lfl_post_build_copy_bin(chess_tests chess_tests LChess)
 
   if(CHESS_MAGICGEN)
     lfl_add_target(magicgen EXECUTABLE SOURCES magicgen.cpp

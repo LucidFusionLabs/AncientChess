@@ -129,6 +129,7 @@ inline uint8_t GetMoveFromSquare(Move move) { return (move >> 17) & 0x3f; }
 inline uint8_t GetMoveToSquare  (Move move) { return (move >> 11) & 0x3f; }
 inline uint8_t GetMoveCapture   (Move move) { return (move >> 26) & 0x7; }
 inline uint8_t GetMovePromotion (Move move) { return (move >> 29) & 0x7; }
+inline Move GetMoveFlagMask() { return 0x7ff; }
 
 inline Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t promote, uint8_t flags) {
   return ((promote & 7) << 29) | ((capture & 7) << 26) | ((piece & 7) << 23) | ((start_square & 0x3f) << 17) |
@@ -603,6 +604,7 @@ float StaticEvaluation(Position in) {
   bool my_color = in.flags.to_move_color;
   auto my_moves = GenerateMoves(in, my_color, &my_material);
   in.move_number++;
+  in.move &= ~GetMoveFlagMask();
   auto opponent_moves = GenerateMoves(in, !my_color, &opponent_material);
   auto &white_moves = my_color ? opponent_moves : my_moves;
   auto &black_moves = my_color ? my_moves : opponent_moves;
@@ -696,7 +698,7 @@ struct Engine {
       } else ERROR("unknown position type '", type, "'");
     } else if (text == "go" || PrefixMatch(text, "go ")) {
       auto move = AlphaBetaNegamaxSearch(game.position, game.position.flags.to_move_color,
-                                         -INFINITY, INFINITY, 3);
+                                         -INFINITY, INFINITY, 4);
       string text = StrCat(SquareName(GetMoveFromSquare(move.first)),
                            SquareName(GetMoveToSquare(move.first)));
       INFO("bestmove ", text, " ", move.second);
@@ -725,7 +727,7 @@ struct UniversalChessInterfaceEngine {
     Socket fd = fileno(process.in);
     SystemNetwork::SetSocketBlocking(fd, false);
     if ((window = w)) app->scheduler.AddMainWaitSocket(window, fd, SocketSet::READABLE, bind(&UniversalChessInterfaceEngine::ReadCB, this));
-    CHECK(FWriteSuccess(process.out, "uci\nisready\n" ));
+    CHECK(Write("uci\nisready\n"));
     return true;
   }
 
@@ -740,8 +742,12 @@ struct UniversalChessInterfaceEngine {
     result_cb.emplace_back(move(callback));
     // string position = StrCat("startpos moves ", game->LongAlgebraicMoveList());
     string position = StrCat("fen ", game->position.GetFEN());
-    CHECK(FWriteSuccess(process.out, StrCat("ucinewgame\nposition ", position,
-                                            "\ngo movetime ", movesecs, "\n")));
+    CHECK(Write(StrCat("ucinewgame\nposition ", position, "\ngo movetime ", movesecs, "\n")));
+  }
+
+  bool Write(const string &s) {
+    // INFO("UniversalChessInterfaceEngine Write('", s, "')");
+    return FWriteSuccess(process.out, s);
   }
 
   bool ReadCB() {
@@ -753,7 +759,7 @@ struct UniversalChessInterfaceEngine {
 
   void LineCB(const StringPiece &linebuf) {
     string line = linebuf.str();
-    // INFO("UniversalChessInterfaceEngine '", line, "'");
+    // INFO("UniversalChessInterfaceEngine Read('", line, "')");
     if (PrefixMatch(line, "bestmove ") && line.size() >= 13) {
       if (result_cb.size()) {
         if (result_cb.front()) result_cb.front()(Chess::SquareID(line.substr(9, 2).c_str()),
