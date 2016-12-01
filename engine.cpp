@@ -18,6 +18,6 @@ extern "C" int MyAppMain() {
   CHECK_EQ(0, LFL::app->Create(__FILE__));
   LFL::Chess::Engine engine([](const string &s) { write(1, s.data(), s.size()); });
   line_buf.cb = bind(&LFL::Chess::Engine::LineCB, &engine, _1);
-  while ((len = read(0, buf, sizeof(buf))) >= 0) line_buf.AddData(StringPiece(buf, len));
+  while ((len = read(0, buf, sizeof(buf))) > 0) line_buf.AddData(StringPiece(buf, len));
   return 0;
 }

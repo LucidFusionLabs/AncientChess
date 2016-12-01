@@ -221,10 +221,7 @@ struct ChessGUI : public GUI {
         pm.move = Chess::GetMove(piece, start_square, end_square, 0, 0, 0);
       }
     } else if (auto e = chess_engine.get()) {
-      bool move_color = game->position.flags.to_move_color;
-      if (Chess::GetPieceColor(game->last_position.GetSquare(start_square)) != move_color ||
-          !(Chess::SquareMask(end_square) & game->last_position.PieceMoves
-            (piece, start_square, move_color, game->last_position.AllAttacks(!move_color)))) {
+      if (game->position.IllegalMove(piece, start_square, end_square, game->last_position)) {
         IllegalMoveCB();
         game->position = game->last_position;
       } else {
@@ -234,22 +231,8 @@ struct ChessGUI : public GUI {
         }
         game->active = true;
         game->update_time = Now();
-        game->position.move_number++;
-        game->position.flags.to_move_color = game->position.move_number % 2;
-        bool en_passant = piece == Chess::PAWN && Chess::SquareX(start_square) != Chess::SquareX(end_square) &&
-          !Chess::GetPieceType(game->last_position.GetSquare(end_square));
-        uint8_t capture_square = en_passant ? (end_square + 8 * (move_color ? 1 : -1)) : end_square, promotion = 0;
-        Chess::Piece capture = game->last_position.GetSquare(capture_square);
-        if (capture) game->position.ClearSquare(capture_square, move_color != Chess::WHITE, move_color != Chess::BLACK);
-        if (piece == Chess::KING && abs(Chess::SquareX(end_square) - Chess::SquareX(start_square)) > 1) 
-          game->position.UpdateCastles(move_color, end_square);
-        if (piece == Chess::PAWN && Chess::SquareY(end_square) == (move_color ? 0 : 7)) {
-          promotion = Chess::QUEEN;
-          game->position.ClearSquare(end_square, move_color == Chess::WHITE, move_color == Chess::BLACK);
-          game->position.SetSquare(end_square, Chess::GetPiece(move_color, promotion));
-        }
         game->position.name = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
-        game->position.UpdateMove(true, piece, start_square, end_square, capture, promotion, en_passant ? Chess::MoveFlag::EnPassant : 0);
+        game->position.MakeMove(piece, start_square, end_square, game->last_position);
         game->AddNewMove();
         GameUpdateCB(game, animate, animate ? start_square : -1, animate ? end_square : -1);
       }

@@ -228,22 +228,25 @@ TEST(BoardTest, ByteBoard) {
   EXPECT_EQ(black_initial[Chess::QUEEN],  ByteBoardToBitBoard(initial_byte_board, 'q'));
   EXPECT_EQ(black_initial[Chess::KING],   ByteBoardToBitBoard(initial_byte_board, 'k'));
 
-  EXPECT_EQ(Chess::Position::FromByteBoard("--------\n"
-                                           "-kp-----\n"                   
-                                           "-pp-n---\n"                   
-                                           "p---qp--\n"                   
-                                           "--------\n"                   
-                                           "--PP--P-\n"                   
-                                           "PPK-NQ--\n"                   
-                                           "--------\n").QueenMoves(Chess::e5, Chess::BLACK),
-            BitBoardFromString("00000001\n"
-                               "00000010\n"
-                               "00010100\n"
-                               "01110000\n"
-                               "00011100\n"
-                               "00101010\n"
-                               "00001000\n"
-                               "00000000\n"));
+  Chess::Position position = Chess::Position::FromByteBoard
+    ("--------\n"
+     "-kp-----\n"                   
+     "-pp-n---\n"                   
+     "p---qp--\n"                   
+     "--------\n"                   
+     "--PP--P-\n"                   
+     "PPK-NQ--\n"                   
+     "--------\n");
+
+  EXPECT_EQ(BitBoardFromString
+            ("00000001\n"
+             "00000010\n"
+             "00010100\n"
+             "01110000\n"
+             "00011100\n"
+             "00101010\n"
+             "00001000\n"
+             "00000000\n"), position.QueenMoves(Chess::e5, Chess::BLACK));
 }
 
 TEST(BoardTest, ForsythEdwardsNotation) {
@@ -324,12 +327,16 @@ TEST(MoveTest, Encoding) {
   for (int i=0; i<128; i++) {
     uint8_t from_square = Rand(0, 64-1), to_square = Rand(0, 64-1);
     uint8_t piece = Rand(0, int(END_PIECES)-1), capture = Rand(0, int(END_PIECES)-1), promote = Rand(0, int(END_PIECES)-1);
-    Chess::Move move = GetMove(piece, from_square, to_square, capture, promote, 0);
+    bool killer = Rand(0, 1), check = Rand(0, 1);
+    int flags = 0 | (killer ? MoveFlag::Killer : 0) | (check ? MoveFlag::Check : 0);
+    Chess::Move move = GetMove(piece, from_square, to_square, capture, promote, flags);
     EXPECT_EQ(piece,       GetMovePieceType(move));
     EXPECT_EQ(from_square, GetMoveFromSquare(move));
     EXPECT_EQ(to_square,   GetMoveToSquare(move));
     EXPECT_EQ(capture,     GetMoveCapture(move));
     EXPECT_EQ(promote,     GetMovePromotion(move));
+    EXPECT_EQ(killer,      ((move & MoveFlag::Killer) != 0));
+    EXPECT_EQ(check,       ((move & MoveFlag::Check)  != 0));
   }
 }
 
@@ -343,17 +350,19 @@ TEST(Perft, InitialPosition) {
   // 4     197281    1576     0    0       0          469    8
   // 5     4865609   82719    258  0       0          27351  347
   // 6     119060324 2812008  5248 0       0          809099 10828
+  vector<SearchStats::Total> depth_total;
   Position position;
-  SearchState search;
+  SearchStats search;
   search.max_depth = 6;
+  search.depth_total = &depth_total;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(6, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(20,        d->nodes); EXPECT_EQ(0,       d->captures); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(400,       d->nodes); EXPECT_EQ(0,       d->captures); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(8902,      d->nodes); EXPECT_EQ(34,      d->captures); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(197281,    d->nodes); EXPECT_EQ(1576,    d->captures); }
-  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(4865609,   d->nodes); EXPECT_EQ(82719,   d->captures); }
-  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(119060324, d->nodes); EXPECT_EQ(2812008, d->captures); }
+  EXPECT_EQ(6, depth_total.size());
+  if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(20,        d->nodes); EXPECT_EQ(0,       d->captures); EXPECT_EQ(0,    d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0, d->promotions); EXPECT_EQ(0,      d->checks); }
+  if (auto d = VectorGet(depth_total, 1)) { EXPECT_EQ(400,       d->nodes); EXPECT_EQ(0,       d->captures); EXPECT_EQ(0,    d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0, d->promotions); EXPECT_EQ(0,      d->checks); }
+  if (auto d = VectorGet(depth_total, 2)) { EXPECT_EQ(8902,      d->nodes); EXPECT_EQ(34,      d->captures); EXPECT_EQ(0,    d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0, d->promotions); EXPECT_EQ(12,     d->checks); }
+  if (auto d = VectorGet(depth_total, 3)) { EXPECT_EQ(197281,    d->nodes); EXPECT_EQ(1576,    d->captures); EXPECT_EQ(0,    d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0, d->promotions); EXPECT_EQ(469,    d->checks); }
+  if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(4865609,   d->nodes); EXPECT_EQ(82719,   d->captures); EXPECT_EQ(258,  d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0, d->promotions); EXPECT_EQ(27351,  d->checks); }
+  if (auto d = VectorGet(depth_total, 5)) { EXPECT_EQ(119060324, d->nodes); EXPECT_EQ(2812008, d->captures); EXPECT_EQ(5248, d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0, d->promotions); EXPECT_EQ(809099, d->checks); }
 }
 
 TEST(Perft, Kiwipete) {
@@ -363,17 +372,19 @@ TEST(Perft, Kiwipete) {
   // 3     97862     17102    45    3162    0          993     1
   // 4     4085603   757163   1929  128013  15172      25523   43
   // 5     193690690 35043416 73365 4993637 8392       3309887 30171
+  vector<SearchStats::Total> depth_total;
   Position position = Position::FromByteBoard(kiwipete_byte_board);
-  SearchState search;
+  SearchStats search;
   search.max_depth = 5;
+  search.depth_total = &depth_total;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(5, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(48,        d->nodes); EXPECT_EQ(8,        d->captures); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(2039,      d->nodes); EXPECT_EQ(351,      d->captures); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(97862,     d->nodes); EXPECT_EQ(17102,    d->captures); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(4085603,   d->nodes); EXPECT_EQ(757163,   d->captures); }
-  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(193690690, d->nodes); EXPECT_EQ(35043416, d->captures); }
-  //for (auto &d : search.divide) INFO(SquareName(GetMoveFromSquare(d.first)), SquareName(GetMoveToSquare(d.first)), ": ", d.second.nodes);
+  EXPECT_EQ(5, depth_total.size());
+  if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(48,        d->nodes); EXPECT_EQ(8,        d->captures); EXPECT_EQ(0    , d->enpassants); EXPECT_EQ(2      , d->castles); EXPECT_EQ(0    , d->promotions); EXPECT_EQ(0      , d->checks); }
+  if (auto d = VectorGet(depth_total, 1)) { EXPECT_EQ(2039,      d->nodes); EXPECT_EQ(351,      d->captures); EXPECT_EQ(1    , d->enpassants); EXPECT_EQ(91     , d->castles); EXPECT_EQ(0    , d->promotions); EXPECT_EQ(3      , d->checks); }
+  if (auto d = VectorGet(depth_total, 2)) { EXPECT_EQ(97862,     d->nodes); EXPECT_EQ(17102,    d->captures); EXPECT_EQ(45   , d->enpassants); EXPECT_EQ(3162   , d->castles); EXPECT_EQ(0    , d->promotions); EXPECT_EQ(993    , d->checks); }
+  if (auto d = VectorGet(depth_total, 3)) { EXPECT_EQ(4085603,   d->nodes); EXPECT_EQ(757163,   d->captures); EXPECT_EQ(1929 , d->enpassants); EXPECT_EQ(128013 , d->castles); EXPECT_EQ(15172, d->promotions); EXPECT_EQ(25523  , d->checks); }
+  if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(193690690, d->nodes); EXPECT_EQ(35043416, d->captures); EXPECT_EQ(73365, d->enpassants); EXPECT_EQ(4993637, d->castles); EXPECT_EQ(8392 , d->promotions); EXPECT_EQ(3309887, d->checks); }
+  if (search.divide_total) for (auto &d : *search.divide_total) INFO(GetLongMoveName(d.first), ": ", d.second.nodes);
 }
 
 TEST(Perft, Position3) {
@@ -385,18 +396,20 @@ TEST(Perft, Position3) {
   // 5     674624    52051    1165   0       0          52950    0
   // 6     11030083  940350   33325  0       7552       452473   2733
   // 7     178633661 14519036 294874 0       140024     12797406 87
+  vector<SearchStats::Total> depth_total;
   Position position(perft_pos3_fen);
-  SearchState search;
+  SearchStats search;
   search.max_depth = 7;
+  search.depth_total = &depth_total;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(7, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(14,        d->nodes); EXPECT_EQ(1,        d->captures); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(191,       d->nodes); EXPECT_EQ(14,       d->captures); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(2812,      d->nodes); EXPECT_EQ(209,      d->captures); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(43238,     d->nodes); EXPECT_EQ(3348,     d->captures); }
-  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(674624,    d->nodes); EXPECT_EQ(52051,    d->captures); }
-  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(11030083,  d->nodes); EXPECT_EQ(940350,   d->captures); }
-  if (auto d = VectorGet(search.depth, 6)) { EXPECT_EQ(178633661, d->nodes); EXPECT_EQ(14519036, d->captures); }
+  EXPECT_EQ(7, depth_total.size());
+  if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(14,        d->nodes); EXPECT_EQ(1,        d->captures); EXPECT_EQ(0     , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0     , d->promotions); EXPECT_EQ(2       , d->checks); }
+  if (auto d = VectorGet(depth_total, 1)) { EXPECT_EQ(191,       d->nodes); EXPECT_EQ(14,       d->captures); EXPECT_EQ(0     , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0     , d->promotions); EXPECT_EQ(10      , d->checks); }
+  if (auto d = VectorGet(depth_total, 2)) { EXPECT_EQ(2812,      d->nodes); EXPECT_EQ(209,      d->captures); EXPECT_EQ(2     , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0     , d->promotions); EXPECT_EQ(267     , d->checks); }
+  if (auto d = VectorGet(depth_total, 3)) { EXPECT_EQ(43238,     d->nodes); EXPECT_EQ(3348,     d->captures); EXPECT_EQ(123   , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0     , d->promotions); EXPECT_EQ(1680    , d->checks); }
+  if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(674624,    d->nodes); EXPECT_EQ(52051,    d->captures); EXPECT_EQ(1165  , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0     , d->promotions); EXPECT_EQ(52950   , d->checks); }
+  if (auto d = VectorGet(depth_total, 5)) { EXPECT_EQ(11030083,  d->nodes); EXPECT_EQ(940350,   d->captures); EXPECT_EQ(33325 , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(7552  , d->promotions); EXPECT_EQ(452473  , d->checks); }
+  if (auto d = VectorGet(depth_total, 6)) { EXPECT_EQ(178633661, d->nodes); EXPECT_EQ(14519036, d->captures); EXPECT_EQ(294874, d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(140024, d->promotions); EXPECT_EQ(12797406, d->checks); }
 }
 
 TEST(Perft, Position4) {
@@ -407,31 +420,35 @@ TEST(Perft, Position4) {
   // 4     422333    131393    0    7795     60032      15492    5
   // 5     15833292  2046173   6512 0        329464     200568   50562
   // 6     706045033 210369132 212  10882006 81102984   26973664 81076
+  vector<SearchStats::Total> depth_total;
   Position position(perft_pos4_fen);
-  SearchState search;
+  SearchStats search;
   search.max_depth = 6;
+  search.depth_total = &depth_total;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(6, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(6,         d->nodes); EXPECT_EQ(0,         d->captures); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(264,       d->nodes); EXPECT_EQ(87,        d->captures); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(9467,      d->nodes); EXPECT_EQ(1021,      d->captures); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(422333,    d->nodes); EXPECT_EQ(131393 ,   d->captures); }
-  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(15833292,  d->nodes); EXPECT_EQ(2046173,   d->captures); }
-  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(706045033, d->nodes); EXPECT_EQ(210369132, d->captures); }
+  EXPECT_EQ(6, depth_total.size());
+  if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(6,         d->nodes); EXPECT_EQ(0,         d->captures); EXPECT_EQ(0   , d->enpassants); EXPECT_EQ(0       , d->castles); EXPECT_EQ(0       , d->promotions); EXPECT_EQ(0       , d->checks); }
+  if (auto d = VectorGet(depth_total, 1)) { EXPECT_EQ(264,       d->nodes); EXPECT_EQ(87,        d->captures); EXPECT_EQ(0   , d->enpassants); EXPECT_EQ(6       , d->castles); EXPECT_EQ(48      , d->promotions); EXPECT_EQ(10      , d->checks); }
+  if (auto d = VectorGet(depth_total, 2)) { EXPECT_EQ(9467,      d->nodes); EXPECT_EQ(1021,      d->captures); EXPECT_EQ(4   , d->enpassants); EXPECT_EQ(0       , d->castles); EXPECT_EQ(120     , d->promotions); EXPECT_EQ(38      , d->checks); }
+  if (auto d = VectorGet(depth_total, 3)) { EXPECT_EQ(422333,    d->nodes); EXPECT_EQ(131393 ,   d->captures); EXPECT_EQ(0   , d->enpassants); EXPECT_EQ(7795    , d->castles); EXPECT_EQ(60032   , d->promotions); EXPECT_EQ(15492   , d->checks); }
+  if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(15833292,  d->nodes); EXPECT_EQ(2046173,   d->captures); EXPECT_EQ(6512, d->enpassants); EXPECT_EQ(0       , d->castles); EXPECT_EQ(329464  , d->promotions); EXPECT_EQ(200568  , d->checks); }
+  if (auto d = VectorGet(depth_total, 5)) { EXPECT_EQ(706045033, d->nodes); EXPECT_EQ(210369132, d->captures); EXPECT_EQ(212 , d->enpassants); EXPECT_EQ(10882006, d->castles); EXPECT_EQ(81102984, d->promotions); EXPECT_EQ(26973664, d->checks); }
 }
 
 TEST(Perft, Position4Mirror) {
+  vector<SearchStats::Total> depth_total;
   Position position(perft_pos4_mirror_fen);
-  SearchState search;
+  SearchStats search;
   search.max_depth = 6;
+  search.depth_total = &depth_total;
   FullSearch(position, BLACK, &search);
-  EXPECT_EQ(6, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(6,         d->nodes); EXPECT_EQ(0,         d->captures); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(264,       d->nodes); EXPECT_EQ(87,        d->captures); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(9467,      d->nodes); EXPECT_EQ(1021,      d->captures); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(422333,    d->nodes); EXPECT_EQ(131393 ,   d->captures); }
-  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(15833292,  d->nodes); EXPECT_EQ(2046173,   d->captures); }
-  if (auto d = VectorGet(search.depth, 5)) { EXPECT_EQ(706045033, d->nodes); EXPECT_EQ(210369132, d->captures); }
+  EXPECT_EQ(6, depth_total.size());
+  if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(6,         d->nodes); EXPECT_EQ(0,         d->captures); EXPECT_EQ(0   , d->enpassants); EXPECT_EQ(0       , d->castles); EXPECT_EQ(0       , d->promotions); EXPECT_EQ(0       , d->checks); }
+  if (auto d = VectorGet(depth_total, 1)) { EXPECT_EQ(264,       d->nodes); EXPECT_EQ(87,        d->captures); EXPECT_EQ(0   , d->enpassants); EXPECT_EQ(6       , d->castles); EXPECT_EQ(48      , d->promotions); EXPECT_EQ(10      , d->checks); }
+  if (auto d = VectorGet(depth_total, 2)) { EXPECT_EQ(9467,      d->nodes); EXPECT_EQ(1021,      d->captures); EXPECT_EQ(4   , d->enpassants); EXPECT_EQ(0       , d->castles); EXPECT_EQ(120     , d->promotions); EXPECT_EQ(38      , d->checks); }
+  if (auto d = VectorGet(depth_total, 3)) { EXPECT_EQ(422333,    d->nodes); EXPECT_EQ(131393 ,   d->captures); EXPECT_EQ(0   , d->enpassants); EXPECT_EQ(7795    , d->castles); EXPECT_EQ(60032   , d->promotions); EXPECT_EQ(15492   , d->checks); }
+  if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(15833292,  d->nodes); EXPECT_EQ(2046173,   d->captures); EXPECT_EQ(6512, d->enpassants); EXPECT_EQ(0       , d->castles); EXPECT_EQ(329464  , d->promotions); EXPECT_EQ(200568  , d->checks); }
+  if (auto d = VectorGet(depth_total, 5)) { EXPECT_EQ(706045033, d->nodes); EXPECT_EQ(210369132, d->captures); EXPECT_EQ(212 , d->enpassants); EXPECT_EQ(10882006, d->castles); EXPECT_EQ(81102984, d->promotions); EXPECT_EQ(26973664, d->checks); }
 }
 
 TEST(Perft, Position5) {
@@ -441,16 +458,18 @@ TEST(Perft, Position5) {
   // 3     62379
   // 4     2103487
   // 5     89941194
+  vector<SearchStats::Total> depth_total;
   Position position(perft_pos5_fen);
-  SearchState search;
+  SearchStats search;
   search.max_depth = 5;
+  search.depth_total = &depth_total;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(5, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(44,       d->nodes); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(1486,     d->nodes); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(62379,    d->nodes); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(2103487,  d->nodes); }
-  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(89941194, d->nodes); }
+  EXPECT_EQ(5, depth_total.size());
+  if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(44,       d->nodes); }
+  if (auto d = VectorGet(depth_total, 1)) { EXPECT_EQ(1486,     d->nodes); }
+  if (auto d = VectorGet(depth_total, 2)) { EXPECT_EQ(62379,    d->nodes); }
+  if (auto d = VectorGet(depth_total, 3)) { EXPECT_EQ(2103487,  d->nodes); }
+  if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(89941194, d->nodes); }
 }
 
 TEST(Perft, Position6) {
@@ -464,22 +483,25 @@ TEST(Perft, Position6) {
   // 7     287188994746
   // 8     11923589843526
   // 9     490154852788714
+  vector<SearchStats::Total> depth_total;
   Position position(perft_pos6_fen);
-  SearchState search;
+  SearchStats search;
   search.max_depth = 5;
+  search.depth_total = &depth_total;
   FullSearch(position, WHITE, &search);
-  EXPECT_EQ(5, search.depth.size());
-  if (auto d = VectorGet(search.depth, 0)) { EXPECT_EQ(46,        d->nodes); }
-  if (auto d = VectorGet(search.depth, 1)) { EXPECT_EQ(2079,      d->nodes); }
-  if (auto d = VectorGet(search.depth, 2)) { EXPECT_EQ(89890,     d->nodes); }
-  if (auto d = VectorGet(search.depth, 3)) { EXPECT_EQ(3894594,   d->nodes); }
-  if (auto d = VectorGet(search.depth, 4)) { EXPECT_EQ(164075551, d->nodes); }
+  EXPECT_EQ(5, depth_total.size());
+  if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(46,        d->nodes); }
+  if (auto d = VectorGet(depth_total, 1)) { EXPECT_EQ(2079,      d->nodes); }
+  if (auto d = VectorGet(depth_total, 2)) { EXPECT_EQ(89890,     d->nodes); }
+  if (auto d = VectorGet(depth_total, 3)) { EXPECT_EQ(3894594,   d->nodes); }
+  if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(164075551, d->nodes); }
 }
 
 TEST(Perft, PerftSuite) {
   unique_ptr<File> testfile(Asset::OpenFile("perftsuite.epd"));
-  if (!testfile) { EXPECT_TRUE(false); return; }
+  if (!testfile || !testfile->Opened()) { EXPECT_TRUE(false); return; }
   FileLineIter tests(testfile.get());
+  vector<SearchStats::Total> depth_total;
   Chess::Position position;
   vector<string> arg;
   int count=0;
@@ -493,12 +515,76 @@ TEST(Perft, PerftSuite) {
       depth.push_back(LFL::atoi(arg[i].data() + 3));
     }
     INFO("PerftSuite[", ++count, "]: depth=", depth.size(), " ", position.GetFEN());
-    SearchState search;
+    SearchStats search;
     search.max_depth = depth.size();
+    (search.depth_total = &depth_total)->clear();
     FullSearch(position, position.flags.to_move_color, &search);
-    if (depth.size() != search.depth.size()) { EXPECT_TRUE(false); continue; }
-    for (int i=0, l=depth.size(); i != l; ++i) { EXPECT_EQ(depth[i], search.depth[i].nodes); }
+    if (depth.size() != depth_total.size()) { EXPECT_TRUE(false); continue; }
+    for (int i=0, l=depth.size(); i != l; ++i) { EXPECT_EQ(depth[i], depth_total[i].nodes); }
   }
 }
-
 #endif // CHESS_PERFT_TESTS
+
+TEST(EvaluationTest, Static) {
+  Position position;
+  EXPECT_FLOAT_EQ(0, StaticEvaluation(position)); 
+
+  EXPECT_EQ(true, position.LoadFEN("4k3/3PP3/4K3/8/8/8/8/8 b - - 0 40"));
+  EXPECT_GT(StaticEvaluation(position), 100);
+
+  EXPECT_EQ(true, position.LoadFEN("4k3/4P3/3PK3/8/8/8/8/8 b - - 0 40"));
+  EXPECT_FLOAT_EQ(0, StaticEvaluation(position));
+
+  EXPECT_EQ(true, position.LoadFEN("8/8/8/8/8/4k3/3pp3/4K3 w - - 0 40"));
+  EXPECT_LT(StaticEvaluation(position), -100);
+
+  EXPECT_EQ(true, position.LoadFEN("8/8/8/8/8/3pk3/4p3/4K3 w - - 0 40"));
+  EXPECT_FLOAT_EQ(0, StaticEvaluation(position));
+}
+
+TEST(EvaluationTest, Search) {
+  Position position;
+
+  // white to play, mate in 1
+  EXPECT_EQ(true, position.LoadFEN("4k3/4P3/3PK3/8/8/8/8/8 w - - 0 40"));
+  auto move = AlphaBetaNegamaxSearch(position, position.flags.to_move_color, -INFINITY, INFINITY, 1);
+  EXPECT_EQ("d6d7", GetLongMoveName(move.first));
+  EXPECT_GT(move.second, 100);
+
+  // black to play, mate in 1
+  EXPECT_EQ(true, position.LoadFEN("8/8/8/8/8/3pk3/4p3/4K3 b - - 0 40"));
+  move = AlphaBetaNegamaxSearch(position, position.flags.to_move_color, -INFINITY, INFINITY, 1);
+  EXPECT_EQ("d3d2", GetLongMoveName(move.first));
+  EXPECT_GT(move.second, 100);
+
+  // white to play, mate in 2
+  EXPECT_EQ(true, position.LoadFEN("r1bq1r1k/1pppNppp/p7/4R2Q/n7/8/PPPP1PPP/R1B3K1 w - - 0 40"));
+  move = AlphaBetaNegamaxSearch(position, position.flags.to_move_color, -INFINITY, INFINITY, 3);
+  EXPECT_GT(move.second, 100);
+  EXPECT_EQ("h5h7", GetLongMoveName(move.first));
+
+  // black to play, mate in 2
+  EXPECT_EQ(true, position.LoadFEN("Q7/ppp2k1p/3p2p1/5b2/4P1nq/2P4P/PP1P1bP1/RNB2R1K b - - 0 40"));
+  move = AlphaBetaNegamaxSearch(position, position.flags.to_move_color, -INFINITY, INFINITY, 3);
+  EXPECT_GT(move.second, 100);
+  EXPECT_EQ("h4h3", GetLongMoveName(move.first));
+
+  // white to play, mate in 3
+  EXPECT_EQ(true, position.LoadFEN("r4r2/1q3pkp/p1b1p1n1/1p4QP/4P3/1BP3P1/P4P2/R2R2K1 w - - 0 40"));
+  move = AlphaBetaNegamaxSearch(position, position.flags.to_move_color, -INFINITY, INFINITY, 5);
+  EXPECT_GT(move.second, 100);
+  EXPECT_EQ("h5h6", GetLongMoveName(move.first));
+
+  // black to play, mate in 3
+  EXPECT_EQ(true, position.LoadFEN("r7/2p2pk1/p5p1/1p1Q2Kp/1P6/2P1N2P/1P2n1P1/R5b1 b - - 0 40"));
+  move = AlphaBetaNegamaxSearch(position, position.flags.to_move_color, -INFINITY, INFINITY, 5);
+  EXPECT_GT(move.second, 100);
+  EXPECT_EQ("f7f6", GetLongMoveName(move.first));
+
+  // white to play, mate in 4
+  EXPECT_EQ(true, position.LoadFEN("rnb3kr/ppp2ppp/1b6/3q4/3pN3/Q4N2/PPP2KPP/R1B1R3 w - - 0 40"));
+  move = AlphaBetaNegamaxSearch(position, position.flags.to_move_color, -INFINITY, INFINITY, 7);
+  EXPECT_GT(move.second, 100);
+  EXPECT_EQ("e4f6", GetLongMoveName(move.first));
+}
+

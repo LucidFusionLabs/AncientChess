@@ -36,10 +36,10 @@ enum { h1=0,  g1=1,  f1=2,  e1=3,  d1=4,  c1=5,  b1=6,  a1=7,
        h6=40, g6=41, f6=42, e6=43, d6=44, c6=45, b6=46, a6=47,
        h7=48, g7=49, f7=50, e7=51, d7=52, c7=53, b7=54, a7=55,
        h8=56, g8=57, f8=58, e8=59, d8=60, c8=61, b8=62, a8=63 };
-struct MoveFlag { enum { Castle=1, CastleLong=2, Check=4, Checkmate=8, DoubleStepPawn=16, EnPassant=32 }; };
+struct MoveFlag { enum { Killer=1<<10, Check=1<<9, Castle=1<<8, DoubleStepPawn=1<<7, EnPassant=1<<6 }; };
 
 static int no_special_moves[] = { 0 };
-static int king_special_moves [] = { MoveFlag::Castle, MoveFlag::CastleLong, 0 };
+static int king_special_moves [] = { MoveFlag::Castle, 0 };
 static int pawn_special_moves [] = { MoveFlag::DoubleStepPawn, MoveFlag::EnPassant, 0 };
 static int *special_moves[] = { nullptr, pawn_special_moves, no_special_moves, no_special_moves, no_special_moves, no_special_moves, king_special_moves };
 
@@ -124,18 +124,6 @@ inline Piece GetPiece(bool color, uint8_t piece) {
   return (uint8_t(color) << 3) | (piece & 7);
 }
 
-inline uint8_t GetMovePieceType (Move move) { return (move >> 23) & 0x7; }
-inline uint8_t GetMoveFromSquare(Move move) { return (move >> 17) & 0x3f; }
-inline uint8_t GetMoveToSquare  (Move move) { return (move >> 11) & 0x3f; }
-inline uint8_t GetMoveCapture   (Move move) { return (move >> 26) & 0x7; }
-inline uint8_t GetMovePromotion (Move move) { return (move >> 29) & 0x7; }
-inline Move GetMoveFlagMask() { return 0x7ff; }
-
-inline Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t promote, uint8_t flags) {
-  return ((promote & 7) << 29) | ((capture & 7) << 26) | ((piece & 7) << 23) | ((start_square & 0x3f) << 17) |
-    ((end_square & 0x3f) << 11) | flags;
-}
-
 inline int8_t SquareX(int s) { return 7 - (s % 8); }
 inline int8_t SquareY(int s) { return s / 8; }
 inline int8_t SquareFromXY(int x, int y) { return (x<0 || y<0 || x>7 || y>7) ? -1 : (y*8 + (7-x)); }
@@ -216,10 +204,26 @@ BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
 #include "magic.h"
 namespace LFL {
 namespace Chess {
+
+inline uint8_t GetMovePieceType (Move move) { return (move >> 23) & 0x7; }
+inline uint8_t GetMoveFromSquare(Move move) { return (move >> 17) & 0x3f; }
+inline uint8_t GetMoveToSquare  (Move move) { return (move >> 11) & 0x3f; }
+inline uint8_t GetMoveCapture   (Move move) { return (move >> 26) & 0x7; }
+inline uint8_t GetMovePromotion (Move move) { return (move >> 29) & 0x7; }
+inline string GetLongMoveName(Move move) { return StrCat(SquareName(GetMoveFromSquare(move)), SquareName(GetMoveToSquare(move))); }
+inline Move GetMoveFlagMask() { return 0x7ff; }
+
+inline Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t promote, uint16_t flags) {
+  return ((promote & 7) << 29) | ((capture & 7) << 26) | ((piece & 7) << 23) | ((start_square & 0x3f) << 17) |
+    ((end_square & 0x3f) << 11) | (flags & GetMoveFlagMask());
+}
   
 struct PieceCount { 
   uint8_t pawn_count:4, knight_count:4, bishop_count:4, rook_count:4, queen_count:4, king_count:4;
   PieceCount() { Clear(); }
+  string DebugString() const { return StrCat("{", int(pawn_count), ", ", int(knight_count), ", ",
+                                             int(bishop_count), ", ", int(rook_count), ", ",
+                                             int(queen_count), ", ", int(king_count), "}"); }
   void Clear() { pawn_count=knight_count=bishop_count=rook_count=queen_count=king_count=0; }
   void Add(uint8_t piece) {
     switch(piece) {
@@ -336,12 +340,42 @@ struct Position {
     return true;
   }
 
+  bool IllegalMove(int8_t piece, int8_t start_square, int8_t end_square, const Position &last_position) const {
+    bool move_color = flags.to_move_color;
+    return GetPieceColor(last_position.GetSquare(start_square)) != move_color ||
+      !(SquareMask(end_square) & last_position.PieceMoves
+        (piece, start_square, move_color, last_position.AllAttacks(!move_color)));
+  }
+
+  void MakeMove(int8_t piece, int8_t start_square, int8_t end_square, const Position &last_position) {
+    bool move_color = flags.to_move_color;
+    move_number++;
+    flags.to_move_color = move_number % 2;
+    bool en_passant = piece == PAWN && SquareX(start_square) != SquareX(end_square) &&
+      !GetPieceType(last_position.GetSquare(end_square));
+    uint8_t promotion = 0, capture_square = en_passant ? (end_square + 8 * (move_color ? 1 : -1)) : end_square;
+    Piece capture = last_position.GetSquare(capture_square);
+    if (capture) ClearSquare(capture_square, move_color != WHITE, move_color != BLACK);
+    if (piece == KING && abs(SquareX(end_square) - SquareX(start_square)) > 1) 
+      UpdateCastles(move_color, end_square);
+    if (piece == PAWN && SquareY(end_square) == (move_color ? 0 : 7)) {
+      promotion = QUEEN;
+      ClearSquare(end_square, move_color == WHITE, move_color == BLACK);
+      SetSquare(end_square, GetPiece(move_color, promotion));
+    }
+    UpdateMove(true, piece, start_square, end_square, capture, promotion, en_passant ? MoveFlag::EnPassant : 0);
+  }
+
   void UpdateMove(bool new_move, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured,
-                  uint8_t promotion, uint8_t move_flags) {
+                  uint8_t promotion, uint16_t move_flags) {
     bool piece_color = (move_number % 2) == 0;
+    CHECK_EQ(GetPiece(piece_color, promotion ? promotion : piece_type), GetSquare(square_to));
+
     if (piece_type == PAWN && abs(SquareY(square_to) - SquareY(square_from)) == 2)
       move_flags |= MoveFlag::DoubleStepPawn;
-    CHECK_EQ(GetPiece(piece_color, promotion ? promotion : piece_type), GetSquare(square_to));
+    if (InCheck(!piece_color, AllAttacks(piece_color)))
+      move_flags |= MoveFlag::Check;
+
     move = Chess::GetMove(piece_type, square_from, square_to, captured, promotion, move_flags);
     if (!new_move) return;
 
@@ -465,7 +499,7 @@ struct Position {
     return RookMoves(p, black) | BishopMoves(p, black);
   }
 
-  BitBoard KingCastles(int p, bool black, BitBoard attacked) const {
+  BitBoard KingShortCastles(int p, bool black, BitBoard attacked) const {
     if (SquareMask(p) & attacked) return 0;
     if (black) { if (!flags.b_cant_castle && !(AllPieces() & black_castle_path) && !(attacked & black_castle_path)) return SquareMask(g8); }
     else       { if (!flags.w_cant_castle && !(AllPieces() & white_castle_path) && !(attacked & white_castle_path)) return SquareMask(g1); }
@@ -479,6 +513,19 @@ struct Position {
     return 0;
   }
 
+  BitBoard KingCastles(int p, bool black, BitBoard attacked) const {
+    if (SquareMask(p) & attacked) return 0;
+    BitBoard ret = 0;
+    if (black) {
+      if (!flags.b_cant_castle      && !(AllPieces() & black_castle_path)       && !(attacked & black_castle_path))      ret |= SquareMask(g8);
+      if (!flags.b_cant_castle_long && !(AllPieces() & black_castle_long_clear) && !(attacked & black_castle_long_path)) ret |= SquareMask(c8); 
+    } else {
+      if (!flags.w_cant_castle      && !(AllPieces() & white_castle_path)       && !(attacked & white_castle_path))      ret |= SquareMask(g1); 
+      if (!flags.w_cant_castle_long && !(AllPieces() & white_castle_long_clear) && !(attacked & white_castle_long_path)) ret |= SquareMask(c1); 
+    }
+    return ret;
+  }
+
   BitBoard NormalKingMoves(int p, bool black, BitBoard attacked) const {
     return king_occupancy_mask[p] & ~Pieces(black)[ALL] & ~attacked;
   }
@@ -487,6 +534,8 @@ struct Position {
     return (king_occupancy_mask[p] & ~Pieces(black)[ALL] & ~attacked)
       | KingCastles(p, black, attacked) | KingLongCastles(p, black, attacked);
   }
+
+  BitBoard KingAttacks(int p, bool black) const { return king_occupancy_mask[p]; }
 
   BitBoard PieceMoves(int piece, int square, bool black, BitBoard attacked=0) const {
     if      (piece == PAWN)   return PawnMoves  (square, black);
@@ -504,9 +553,8 @@ struct Position {
       else if (type == MoveFlag::DoubleStepPawn) return DoubleStepPawnAdvances(square, black);
       else return SingleStepPawnAdvances(square, black) | PawnCaptures(square, black);
     } else if (piece == KING) {
-      if      (type == MoveFlag::Castle)     return KingCastles(square, black, attacked);
-      else if (type == MoveFlag::CastleLong) return KingLongCastles(square, black, attacked);
-      else                                   return NormalKingMoves(square, black, attacked);
+      if      (type == MoveFlag::Castle) return KingCastles(square, black, attacked);
+      else                               return NormalKingMoves(square, black, attacked);
     } else if (piece == KNIGHT) return KnightMoves(square, black);
     else if (piece == BISHOP) return BishopMoves(square, black);
     else if (piece == ROOK)   return RookMoves  (square, black);
@@ -514,17 +562,17 @@ struct Position {
     else                      FATAL("unknown piece ", piece);
   }
 
-  BitBoard PieceAttacks(int piece, int square, bool black, BitBoard attacked=0) const {
-    if      (piece == PAWN)   return PawnAttacks(square, black) | PawnEnPassant(square, black);
+  BitBoard PieceAttacks(int piece, int square, bool black) const {
+    if      (piece == PAWN)   return PawnAttacks(square, black);
     else if (piece == KNIGHT) return KnightMoves(square, black);
     else if (piece == BISHOP) return BishopMoves(square, black);
     else if (piece == ROOK)   return RookMoves  (square, black);
     else if (piece == QUEEN)  return QueenMoves (square, black);
-    else if (piece == KING)   return KingMoves  (square, black, attacked);
+    else if (piece == KING)   return KingAttacks(square, black);
     else                      FATAL("unknown piece ", piece);
   }
 
-  BitBoard AllAttacks(bool color, BitBoard attacked=0) const {
+  BitBoard AllAttacks(bool color) const {
     BitBoard ret = 0;
     for (int piece_type = PAWN; piece_type != END_PIECES; ++piece_type)
       for (SquareIter p(Pieces(color)[piece_type]); p; ++p)
@@ -532,26 +580,38 @@ struct Position {
     return ret;
   }
 
-  bool InCheck(BitBoard attacks, bool color) const {
+  bool InCheck(bool color, BitBoard attacks) const {
     return attacks & Pieces(color)[KING];
   }
 };
 
-struct SearchState {
+struct SearchStats {
   struct Total {
-    int nodes=0, captures=0, enpassants=0, castles=0, promotions=0, checks=0, checkmates=0;
-    void CountMove(bool capture) { nodes++; if (capture) captures++; }
+    int nodes=0, captures=0, promotions=0, castles=0, enpassants=0, checks=0, checkmates=0;
+    void CountMove(Move move) {
+      nodes++;
+      if (GetMoveCapture(move))       captures++;
+      if (GetMovePromotion(move))     promotions++;
+      if (move & MoveFlag::Castle)    castles++;
+      if (move & MoveFlag::EnPassant) enpassants++;
+      if (move & MoveFlag::Check)     checks++;
+      if (move & MoveFlag::Killer)    checkmates++;
+    }
   };
-  Total total;
-  vector<Total> depth;
-  unordered_map<Move, Total> divide;
-  int max_depth=0;
 
-  void CountMove(int di, bool capture, Total *divide=0) {
-    total.CountMove(capture);
-    if (divide && di+1 == max_depth) divide->CountMove(capture);
-    if (di >= depth.size()) depth.resize(di+1);
-    depth[di].CountMove(capture);
+  Total *total;
+  vector<Total> *depth_total;
+  unordered_map<Move, Total> *divide_total;
+  vector<Move> pv;
+  int max_depth=0;
+  virtual ~SearchStats() {}
+  SearchStats(Total *T=0, vector<Total> *DT=0, unordered_map<Move, Total> *D=0) :
+    total(T), depth_total(DT), divide_total(D) {}
+
+  void CountMove(Move move, int di, Total *divide=0) {
+    if (total) total->CountMove(move);
+    if (depth_total) VectorEnsureElement(*depth_total, di)->CountMove(move);
+    if (divide && di+1 == max_depth) divide->CountMove(move);
   }
 };
 
@@ -583,12 +643,12 @@ vector<Position> GenerateMoves(const Position &in, bool color, PieceCount *piece
               Position pos = promote_pos;
               pos.SetSquare(square_to, GetPiece(color, promotion));
               pos.UpdateMove(true, GetPieceType(piece), square_from, square_to, captured_piece_type, promotion, 0);
-              if (!pos.InCheck(pos.AllAttacks(!color), color)) ret.push_back(pos);
+              if (!pos.InCheck(color, pos.AllAttacks(!color))) ret.push_back(pos);
             }
           } else {
             position.SetSquare(square_to, piece);
             position.UpdateMove(true, GetPieceType(piece), square_from, square_to, captured_piece_type, 0, *move_type);
-            if (position.InCheck(position.AllAttacks(!color), color)) ret.pop_back();
+            if (position.InCheck(color, position.AllAttacks(!color))) ret.pop_back();
           }
         }
         if (!*move_type) break;
@@ -598,36 +658,58 @@ vector<Position> GenerateMoves(const Position &in, bool color, PieceCount *piece
 }
 
 float StaticEvaluation(Position in) {
-  static float king_weight=200, queen_weight=9, rook_weight=5, knight_weight=3, bishop_weight=3,
-               pawn_weight=1, mobility_weight=.1;
+  static float mate_score=10000, king_weight=200, queen_weight=9, rook_weight=5, knight_weight=3,
+               bishop_weight=3, pawn_weight=1, mobility_weight=.1;
   PieceCount my_material, opponent_material;
   bool my_color = in.flags.to_move_color;
   auto my_moves = GenerateMoves(in, my_color, &my_material);
+  if (my_moves.empty())
+    return in.InCheck(my_color, in.AllAttacks(!my_color)) ? (-mate_score * (my_color ? -1 : 1)) : 0;
   in.move_number++;
   in.move &= ~GetMoveFlagMask();
+  in.flags.to_move_color = !my_color;
   auto opponent_moves = GenerateMoves(in, !my_color, &opponent_material);
   auto &white_moves = my_color ? opponent_moves : my_moves;
   auto &black_moves = my_color ? my_moves : opponent_moves;
   auto &white_material = my_color ? opponent_material : my_material;
   auto &black_material = my_color ? my_material : opponent_material;
   return
-    king_weight     * (white_material.king_count   - black_material.king_count)   +
-    queen_weight    * (white_material.queen_count  - black_material.queen_count)  +
-    rook_weight     * (white_material.rook_count   - black_material.rook_count)   +
-    knight_weight   * (white_material.knight_count - black_material.knight_count) +
-    bishop_weight   * (white_material.bishop_count - black_material.bishop_count) +
-    pawn_weight     * (white_material.pawn_count   - black_material.pawn_count)   +
-    mobility_weight * (white_moves.size()          - black_moves.size());
+    king_weight     * (int(white_material.king_count)   - int(black_material.king_count))   +
+    queen_weight    * (int(white_material.queen_count)  - int(black_material.queen_count))  +
+    rook_weight     * (int(white_material.rook_count)   - int(black_material.rook_count))   +
+    knight_weight   * (int(white_material.knight_count) - int(black_material.knight_count)) +
+    bishop_weight   * (int(white_material.bishop_count) - int(black_material.bishop_count)) +
+    pawn_weight     * (int(white_material.pawn_count)   - int(black_material.pawn_count))   +
+    mobility_weight * (int(white_moves.size())          - int(black_moves.size()));
 }
 
-void FullSearch(Position in, bool color, SearchState *count, int depth=0, SearchState::Total *divide=0) {
+inline bool BasicMoveSort(Move l, Move r) {
+  return r < l;
+}
+
+inline bool MoveSort(Move l, Move r) {
+  if (GetMoveCapture(l)) {
+    if (!GetMoveCapture(r)) return true;
+    else return BasicMoveSort(l, r);
+  } else if (GetMoveCapture(r)) return false;
+  else if (l & MoveFlag::Check) {
+    if (!(r & MoveFlag::Check)) return true;
+    else return BasicMoveSort(l, r);
+  } else return BasicMoveSort(l, r);
+}
+
+bool PositionMoveSort(const Position &l, const Position &r) {
+  return MoveSort(l.move, r.move);
+}
+
+void FullSearch(Position in, bool color, SearchStats *stats, int depth=0, SearchStats::Total *divide=0) {
   auto moves = GenerateMoves(in, color);
   for (auto &m : moves) {
     unsigned char move_from = GetMoveFromSquare(m.move), move_to = GetMoveToSquare(m.move);
-    if (!depth) divide = &count->divide[GetMove(GetMovePieceType(m.move), move_from, move_to, 0, 0, 0)];
-    if (count) count->CountMove(depth, GetMoveCapture(m.move), divide);
-    if (depth+1 >= count->max_depth) continue;
-    FullSearch(m, !color, count, depth+1, divide);
+    if (!depth && stats->divide_total) divide = &(*stats->divide_total)[GetMove(GetMovePieceType(m.move), move_from, move_to, 0, 0, 0)];
+    if (stats) stats->CountMove(m.move, depth, divide);
+    if (depth+1 >= stats->max_depth) continue;
+    FullSearch(m, !color, stats, depth+1, divide);
   }
 }
 
@@ -636,6 +718,7 @@ pair<Move, float> AlphaBetaNegamaxSearch(Position in, bool color, float alpha, f
   float v;
   pair<Move, float> best(0, -INFINITY);
   auto moves = GenerateMoves(in, color);
+  sort(moves.begin(), moves.end(), PositionMoveSort);
   for (auto &m : moves) {
     v = -AlphaBetaNegamaxSearch(m, !color, -beta, -alpha, depth-1).second;
     if (Max(&best.second, v)) best.first = m.move;
@@ -672,7 +755,7 @@ struct Game {
     string text;
     if (!history.size()) return text;
     for (auto b = history.begin()+1, e = history.end(), i = b; i != e; ++i)
-      StrAppend(&text, SquareName(GetMoveFromSquare(i->move)), SquareName(GetMoveToSquare(i->move)), " ");
+      StrAppend(&text, GetLongMoveName(i->move), " ");
     return text;
   }
 };
@@ -698,9 +781,8 @@ struct Engine {
       } else ERROR("unknown position type '", type, "'");
     } else if (text == "go" || PrefixMatch(text, "go ")) {
       auto move = AlphaBetaNegamaxSearch(game.position, game.position.flags.to_move_color,
-                                         -INFINITY, INFINITY, 4);
-      string text = StrCat(SquareName(GetMoveFromSquare(move.first)),
-                           SquareName(GetMoveToSquare(move.first)));
+                                         -INFINITY, INFINITY, 5);
+      string text = GetLongMoveName(move.first);
       INFO("bestmove ", text, " ", move.second);
       write_cb(StrCat("bestmove ", text, "\n"));
     }
