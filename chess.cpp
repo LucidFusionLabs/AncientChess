@@ -47,6 +47,7 @@ struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
   virtual bool Animating() const { return false; }
   virtual void UpdateTargetFPS() {}
   virtual void SetFontSize(int) {}
+  virtual void DrawBox(GraphicsDevice*, Box draw_box, bool check_resized) {}
 };
 
 struct ChessGUI : public GUI {
