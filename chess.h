@@ -202,6 +202,7 @@ BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
 }; // namespace Chess
 }; // namespace LFL
 #include "magic.h"
+#include "pst.h"
 namespace LFL {
 namespace Chess {
 
@@ -428,10 +429,10 @@ struct Position {
     else             { white[piece_type] |= mask; white[0] |= mask; }
   }
 
-  Piece GetSquare(int s) const {
+  Piece GetSquare(int s, bool get_white=true, bool get_black=true) const {
     BitBoard mask = SquareMask(s);
-    for (int i=1; i<7; i++) if (white[i] & mask) return GetPiece(WHITE, i);
-    for (int i=1; i<7; i++) if (black[i] & mask) return GetPiece(BLACK, i);
+    if (get_white) { for (int i=1; i<7; i++) if (white[i] & mask) return GetPiece(WHITE, i); }
+    if (get_black) { for (int i=1; i<7; i++) if (black[i] & mask) return GetPiece(BLACK, i); }
     return GetPiece(WHITE, 0);
   }
 
@@ -439,6 +440,13 @@ struct Position {
     BitBoard mask = SquareMask(s);
     if (clear_white) for (int i=PAWN; i!=END_PIECES; i++) if (white[i] & mask) { white[0] &= ~mask; white[i] &= ~mask; return GetPiece(WHITE, i); }
     if (clear_black) for (int i=PAWN; i!=END_PIECES; i++) if (black[i] & mask) { black[0] &= ~mask; black[i] &= ~mask; return GetPiece(BLACK, i); }
+    return GetPiece(WHITE, 0);
+  }
+
+  Piece ClearSquareOfPiece(int s, int t, bool color) {
+    BitBoard mask = SquareMask(s);
+    if (color) { if (black[t] & mask) { black[0] &= ~mask; black[t] &= ~mask; return GetPiece(BLACK, t); } }
+    else       { if (white[t] & mask) { white[0] &= ~mask; white[t] &= ~mask; return GetPiece(WHITE, t); } }
     return GetPiece(WHITE, 0);
   }
   
@@ -781,7 +789,7 @@ struct Engine {
       } else ERROR("unknown position type '", type, "'");
     } else if (text == "go" || PrefixMatch(text, "go ")) {
       auto move = AlphaBetaNegamaxSearch(game.position, game.position.flags.to_move_color,
-                                         -INFINITY, INFINITY, 5);
+                                         -INFINITY, INFINITY, 6);
       string text = GetLongMoveName(move.first);
       INFO("bestmove ", text, " ", move.second);
       write_cb(StrCat("bestmove ", text, "\n"));

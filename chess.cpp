@@ -88,8 +88,10 @@ struct ChessGUI : public GUI {
     }
 
     auto t = chess_terminal->terminal;
-    t->touch_toggles_keyboard = true;
     t->controller      = chess_terminal->controller.get();
+#ifdef LFL_MOBILE
+    t->drag_cb         = [=](int, point, point, int d){ if (d) app->ToggleTouchKeyboard(); return true; }
+#endif
     t->get_game_cb     = [=](int game_no){ return &game_map[game_no]; };
     t->illegal_move_cb = bind(&ChessGUI::IllegalMoveCB, this);
     t->login_cb        = bind(&ChessGUI::LoginCB,       this);
@@ -177,10 +179,10 @@ struct ChessGUI : public GUI {
     }
   }
 
-  void ClickCB(int button, int x, int y, int down) {
+  void ClickCB(int button, point p, point d, int down) {
     Chess::Game *game = Top();
     if (!game || !down) return;
-    point p = point(x, y) - board.Position();
+    p -= board.Position();
     int square, start_square;
     Chess::Piece moved_piece=0;
     if ((square = SquareFromCoords(p, game->flip_board)) < 0) return;
@@ -195,10 +197,10 @@ struct ChessGUI : public GUI {
     MakeMove(game, Chess::GetPieceType(moved_piece), start_square, square);
   }
 
-  void DragCB(int button, int x, int y, int down) {
+  void DragCB(int button, point p, point d, int down) {
     Chess::Game *game = Top();
     if (!game) return;
-    point p = point(x, y) - board.Position();
+    p -= board.Position();
     int square, start_square;
     Chess::Piece moved_piece=0;
     if ((square = SquareFromCoords(p, game->flip_board)) < 0) return;
