@@ -327,16 +327,21 @@ TEST(MoveTest, Encoding) {
   for (int i=0; i<128; i++) {
     uint8_t from_square = Rand(0, 64-1), to_square = Rand(0, 64-1);
     uint8_t piece = Rand(0, int(END_PIECES)-1), capture = Rand(0, int(END_PIECES)-1), promote = Rand(0, int(END_PIECES)-1);
-    bool killer = Rand(0, 1), check = Rand(0, 1);
-    int flags = 0 | (killer ? MoveFlag::Killer : 0) | (check ? MoveFlag::Check : 0);
+    bool killer = Rand(0, 1), check = Rand(0, 1), castle = Rand(0, 1), double_step = Rand(0, 1), enpassant = Rand(0,1);
+    int flags = 0 | (killer ? MoveFlag::Killer : 0) | (check ? MoveFlag::Check : 0) | (castle ? MoveFlag::Castle : 0) 
+      | (double_step ? MoveFlag::DoubleStepPawn : 0) | (enpassant ? MoveFlag::EnPassant : 0);
+
     Chess::Move move = GetMove(piece, from_square, to_square, capture, promote, flags);
     EXPECT_EQ(piece,       GetMovePieceType(move));
     EXPECT_EQ(from_square, GetMoveFromSquare(move));
     EXPECT_EQ(to_square,   GetMoveToSquare(move));
     EXPECT_EQ(capture,     GetMoveCapture(move));
     EXPECT_EQ(promote,     GetMovePromotion(move));
-    EXPECT_EQ(killer,      ((move & MoveFlag::Killer) != 0));
-    EXPECT_EQ(check,       ((move & MoveFlag::Check)  != 0));
+    EXPECT_EQ(killer,      ((move & MoveFlag::Killer)         != 0));
+    EXPECT_EQ(check,       ((move & MoveFlag::Check)          != 0));
+    EXPECT_EQ(castle,      ((move & MoveFlag::Castle)         != 0));
+    EXPECT_EQ(double_step, ((move & MoveFlag::DoubleStepPawn) != 0));
+    EXPECT_EQ(enpassant,   ((move & MoveFlag::EnPassant)      != 0));
   }
 }
 
@@ -373,10 +378,12 @@ TEST(Perft, Kiwipete) {
   // 4     4085603   757163   1929  128013  15172      25523   43
   // 5     193690690 35043416 73365 4993637 8392       3309887 30171
   vector<SearchStats::Total> depth_total;
+  unordered_map<Chess::Move, SearchStats::Total> divide_total;
   Position position = Position::FromByteBoard(kiwipete_byte_board);
   SearchStats search;
   search.max_depth = 5;
   search.depth_total = &depth_total;
+  // search.divide_total = &divide_total;
   FullSearch(position, WHITE, &search);
   EXPECT_EQ(5, depth_total.size());
   if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(48,        d->nodes); EXPECT_EQ(8,        d->captures); EXPECT_EQ(0    , d->enpassants); EXPECT_EQ(2      , d->castles); EXPECT_EQ(0    , d->promotions); EXPECT_EQ(0      , d->checks); }
@@ -397,10 +404,12 @@ TEST(Perft, Position3) {
   // 6     11030083  940350   33325  0       7552       452473   2733
   // 7     178633661 14519036 294874 0       140024     12797406 87
   vector<SearchStats::Total> depth_total;
+  unordered_map<Chess::Move, SearchStats::Total> divide_total;
   Position position(perft_pos3_fen);
   SearchStats search;
   search.max_depth = 7;
   search.depth_total = &depth_total;
+  // search.divide_total = &divide_total;
   FullSearch(position, WHITE, &search);
   EXPECT_EQ(7, depth_total.size());
   if (auto d = VectorGet(depth_total, 0)) { EXPECT_EQ(14,        d->nodes); EXPECT_EQ(1,        d->captures); EXPECT_EQ(0     , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0     , d->promotions); EXPECT_EQ(2       , d->checks); }
@@ -410,6 +419,7 @@ TEST(Perft, Position3) {
   if (auto d = VectorGet(depth_total, 4)) { EXPECT_EQ(674624,    d->nodes); EXPECT_EQ(52051,    d->captures); EXPECT_EQ(1165  , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(0     , d->promotions); EXPECT_EQ(52950   , d->checks); }
   if (auto d = VectorGet(depth_total, 5)) { EXPECT_EQ(11030083,  d->nodes); EXPECT_EQ(940350,   d->captures); EXPECT_EQ(33325 , d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(7552  , d->promotions); EXPECT_EQ(452473  , d->checks); }
   if (auto d = VectorGet(depth_total, 6)) { EXPECT_EQ(178633661, d->nodes); EXPECT_EQ(14519036, d->captures); EXPECT_EQ(294874, d->enpassants); EXPECT_EQ(0, d->castles); EXPECT_EQ(140024, d->promotions); EXPECT_EQ(12797406, d->checks); }
+  if (search.divide_total) for (auto &d : *search.divide_total) INFO(GetLongMoveName(d.first), ": ", d.second.nodes);
 }
 
 TEST(Perft, Position4) {
@@ -587,4 +597,3 @@ TEST(EvaluationTest, Search) {
   EXPECT_GT(move.second, 100);
   EXPECT_EQ("e4f6", GetLongMoveName(move.first));
 }
-

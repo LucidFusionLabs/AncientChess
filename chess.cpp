@@ -224,7 +224,7 @@ struct ChessGUI : public GUI {
         pm.move = Chess::GetMove(piece, start_square, end_square, 0, 0, 0);
       }
     } else if (auto e = chess_engine.get()) {
-      if (game->position.IllegalMove(piece, start_square, end_square, game->last_position)) {
+      if (game->position.PlayerIllegalMove(piece, start_square, end_square, game->last_position)) {
         IllegalMoveCB();
         game->position = game->last_position;
       } else {
@@ -235,7 +235,7 @@ struct ChessGUI : public GUI {
         game->active = true;
         game->update_time = Now();
         game->position.name = StrCat(Chess::PieceChar(piece), Chess::SquareName(start_square), Chess::SquareName(end_square));
-        game->position.MakeMove(piece, start_square, end_square, game->last_position);
+        game->position.PlayerMakeMove(piece, start_square, end_square, game->last_position);
         game->AddNewMove();
         GameUpdateCB(game, animate, animate ? start_square : -1, animate ? end_square : -1);
       }
