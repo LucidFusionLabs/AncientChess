@@ -242,30 +242,41 @@ struct PieceCount {
 struct PositionFlags {
   uint8_t fifty_move_rule_count:6, to_move_color:1, w_cant_castle:1, b_cant_castle:1,
           w_cant_castle_long:1, b_cant_castle_long:1;
+
   bool operator==(const PositionFlags &p) const {
     return fifty_move_rule_count == p.fifty_move_rule_count && to_move_color == p.to_move_color &&
       w_cant_castle == p.w_cant_castle && b_cant_castle == p.b_cant_castle &&
       w_cant_castle_long == p.w_cant_castle_long && b_cant_castle_long == p.b_cant_castle_long;
   }
+
+  void UpdateForMove(bool piece_color, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured) {
+    if (piece_color == WHITE) {
+      if      (square_from == e1) w_cant_castle = w_cant_castle_long = true;
+      else if (square_from == h1) w_cant_castle = true;
+      else if (square_from == a1) w_cant_castle_long = true;
+      if      (square_to   == a8) b_cant_castle_long = true;
+      else if (square_to   == h8) b_cant_castle = true;
+    } else {
+      if      (square_from == e8) b_cant_castle = b_cant_castle_long = true;
+      else if (square_from == h8) b_cant_castle = true;
+      else if (square_from == a8) b_cant_castle_long = true;
+      if      (square_to   == a1) w_cant_castle_long = true;
+      else if (square_to   == h1) w_cant_castle = true;
+    }
+    if (captured || piece_type == PAWN) fifty_move_rule_count = 0;
+    else                                fifty_move_rule_count++;
+  }
 };
 
-struct Position {
-  Move move=0;
-  PositionFlags flags;
-  uint16_t move_number=0;
+struct BitBoardPosition {
   BitBoard white[7], black[7];
+  BitBoardPosition() {}
 
-  Position() { Reset(); }
-  Position(const string &b) { if (!LoadFEN(b)) Reset(); }
-  void Assign(const Position &p) { *this = p; }
-  static Position FromByteBoard(const string &b) { Position p; p.LoadByteBoard(b); return p; }
-  bool operator==(const Position &p) const { return move == p.move && flags == p.flags && move_number == p.move_number &&
-    !memcmp(white, p.white, sizeof(white)) && !memcmp(black, p.black, sizeof(black)); }
+  BitBoard AllPieces() const { return white[ALL] | black[ALL]; }
+  const BitBoard *Pieces(bool color) const { return color ? black : white; }
+  /**/  BitBoard *Pieces(bool color)       { return color ? black : white; }
 
-  void Reset() {
-    move = 0;
-    move_number = 0;
-    memzero(flags);
+  void SetInitialPosition() {
     for (int i=PAWN; i!=END_PIECES; ++i) white[i] = white_initial[i];
     for (int i=PAWN; i!=END_PIECES; ++i) black[i] = black_initial[i];
     SetAll(WHITE);
@@ -279,10 +290,6 @@ struct Position {
     SetAll(BLACK);
   }
 
-  int NextMoveNumber() const { return move_number ? ((move_number + 2) / 2) : 1; }
-  int StandardMoveNumber() const { return move_number ? ((move_number + 1) / 2) : 1; }
-  const char *StandardMoveSuffix() const { return flags.to_move_color ? "" : "..."; }
-
   string GetByteBoard() const {
     string ret = EmptyByteBoard();
     for (int8_t color=0; color<2; color++)
@@ -294,6 +301,190 @@ struct Position {
         }
     return ret;
   }
+
+  void SetAll(bool color) {
+    BitBoard *pieces = Pieces(color);
+    pieces[ALL] = pieces[PAWN] | pieces[KNIGHT] | pieces[BISHOP] | pieces[ROOK] | pieces[QUEEN] | pieces[KING];
+  }
+
+  void SetSquare(int s, Piece piece) {
+    BitBoard mask = SquareMask(s);
+    uint8_t piece_color = GetPieceColor(piece), piece_type = GetPieceType(piece);
+    DEBUG_CHECK_RANGE(piece_type, PAWN, END_PIECES);
+    if (piece_color) { black[piece_type] |= mask; black[0] |= mask; }
+    else             { white[piece_type] |= mask; white[0] |= mask; }
+  }
+
+  Piece GetSquare(int s, bool get_white=true, bool get_black=true, bool maybe_empty=true) const {
+    BitBoard mask = SquareMask(s);
+    if (get_white) { if (!maybe_empty || (mask & white[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (white[i] & mask) return GetPiece(WHITE, i); }
+    if (get_black) { if (!maybe_empty || (mask & black[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (black[i] & mask) return GetPiece(BLACK, i); }
+    return GetPiece(WHITE, 0);
+  }
+
+  Piece ClearSquare(int s, bool clear_white=true, bool clear_black=true, bool maybe_empty=true) {
+    BitBoard mask = SquareMask(s);
+    if (clear_white) { if (!maybe_empty || (mask & white[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (white[i] & mask) { white[0] &= ~mask; white[i] &= ~mask; return GetPiece(WHITE, i); } }
+    if (clear_black) { if (!maybe_empty || (mask & black[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (black[i] & mask) { black[0] &= ~mask; black[i] &= ~mask; return GetPiece(BLACK, i); } }
+    return GetPiece(WHITE, 0);
+  }
+
+  Piece ClearSquareOfKnownPiece(int s, int t, bool color) {
+    BitBoard mask = SquareMask(s);
+    if (color) { black[0] &= ~mask; black[t] &= ~mask; return GetPiece(BLACK, t); }
+    else       { white[0] &= ~mask; white[t] &= ~mask; return GetPiece(WHITE, t); }
+    return GetPiece(WHITE, 0);
+  }
+
+  void MoveRookForCastles(bool color, int8_t square_to) {
+    uint8_t rook_from, rook_to; 
+    switch(square_to) {
+      case g1: rook_from = h1; rook_to = f1; break;
+      case g8: rook_from = h8; rook_to = f8; break;
+      case c1: rook_from = a1; rook_to = d1; break;
+      case c8: rook_from = a8; rook_to = d8; break;
+      default: FATAL("invalid castle");      break;
+    }
+    uint8_t rook = ClearSquareOfKnownPiece(rook_from, ROOK, color);
+    DEBUG_CHECK_EQ(int(GetPiece(color, ROOK)), int(rook));
+    DEBUG_CHECK_EQ(int(GetPiece(WHITE, 0)), int(GetSquare(rook_to)));
+    SetSquare(rook_to, rook);
+  }
+
+  BitBoard PawnAttacks(int p, bool black) const {
+    return black ? black_pawn_attack_mask[p] : white_pawn_attack_mask[p];
+  }
+
+  BitBoard PawnCaptures(int p, bool black) const {
+    return black ? (black_pawn_attack_mask[p] & Pieces(!black)[ALL])
+                 : (white_pawn_attack_mask[p] & Pieces(!black)[ALL]);
+  }
+
+  BitBoard SingleStepPawnAdvances(int p, bool black) const {
+    return (black ? (SquareMask(p) >> 8) : (SquareMask(p) << 8)) & ~AllPieces();
+  }
+
+  BitBoard DoubleStepPawnAdvances(int p, bool black) const {
+    if (black) { if (SquareY(p) == 6) if ((black_pawn_occupancy_mask[p] & AllPieces()) == 0) return SquareMask(p-16); }
+    else       { if (SquareY(p) == 1) if ((white_pawn_occupancy_mask[p] & AllPieces()) == 0) return SquareMask(p+16); }
+    return 0;
+  }
+
+  BitBoard PawnAdvances(int p, bool black) const {
+    return SingleStepPawnAdvances(p, black) | DoubleStepPawnAdvances(p, black);
+  }
+
+  BitBoard KnightMoves(int p, bool black) const {
+    return knight_occupancy_mask[p] & ~Pieces(black)[ALL];
+  }
+
+  BitBoard BishopMoves(int p, bool black) const {
+    static MagicMoves *magic_moves = Singleton<MagicMoves>::Get();
+    BitBoard blockers = AllPieces() & bishop_occupancy_mask[p];
+    return magic_moves->BishopMoves(p, blockers, Pieces(black)[ALL]);
+  }
+
+  BitBoard RookMoves(int p, bool black) const {
+    static MagicMoves *magic_moves = Singleton<MagicMoves>::Get();
+    BitBoard blockers = AllPieces() & rook_occupancy_mask[p];
+    int magic_index = MagicMoves::MagicHash(p, blockers, rook_magic_number, rook_magic_number_bits);
+    return magic_moves->rook_magic_moves[p][magic_index] & ~Pieces(black)[ALL];
+  }
+
+  BitBoard QueenMoves(int p, bool black) const {
+    return RookMoves(p, black) | BishopMoves(p, black);
+  }
+
+  BitBoard NormalKingMoves(int p, bool black, BitBoard attacked) const {
+    return king_occupancy_mask[p] & ~Pieces(black)[ALL] & ~attacked;
+  }
+
+  BitBoard KingAttacks(int p, bool black) const { return king_occupancy_mask[p]; }
+
+  BitBoard PieceAttacks(int piece, int square, bool black) const {
+    if      (piece == PAWN)   return PawnAttacks(square, black);
+    else if (piece == KNIGHT) return KnightMoves(square, black);
+    else if (piece == BISHOP) return BishopMoves(square, black);
+    else if (piece == ROOK)   return RookMoves  (square, black);
+    else if (piece == QUEEN)  return QueenMoves (square, black);
+    else if (piece == KING)   return KingAttacks(square, black);
+    else                      FATAL("unknown piece ", piece);
+  }
+
+  BitBoard AllAttacks(bool color) const {
+    BitBoard ret = 0;
+    for (int piece_type = PAWN; piece_type != END_PIECES; ++piece_type)
+      for (SquareIter p(Pieces(color)[piece_type]); p; ++p)
+        ret |= PieceAttacks(piece_type, p.GetSquare(), color);
+    return ret;
+  }
+
+  bool InCheck(bool color, BitBoard attacks) const {
+    return attacks & Pieces(color)[KING];
+  }
+};
+
+struct ZobristHasher {
+  typedef uint64_t Hash;
+  struct Index {
+    enum { BlackToMove=0, WhiteCanCastleShort=1, WhiteCanCastleLong=2,
+      BlackCanCastleShort=3, BlackCanCastleLong=4, DoubleStepPawnA=5, End=13 };
+    static int PieceSquareIndex(bool color, uint8_t piece_type, uint8_t square) {
+      return 64 * ((color * 6) + (piece_type - 1)) + square;
+    }
+  };
+
+  vector<Hash> data;
+  Hash initial_position_hash;
+  ZobristHasher() : data(12*64 + Index::End) {
+    for (auto &v : data) v = Rand<Hash>(); 
+    BitBoardPosition ip;
+    ip.SetInitialPosition();
+    PositionFlags flags;
+    memzero(flags);
+    initial_position_hash = GetHash(ip, flags, 0);
+  }
+
+  Hash GetHash(const BitBoardPosition &in, const PositionFlags &flags, uint8_t double_step_file) {
+    Hash ret = 0;
+    for (uint8_t color = 0; color != 2; ++color)
+      for (uint8_t piece_type = PAWN; piece_type != END_PIECES; ++piece_type)
+        for (SquareIter p(in.Pieces(color)[piece_type]); p; ++p)
+          ret ^= data[Index::PieceSquareIndex(color, piece_type, p.GetSquare())];
+    if (!flags.w_cant_castle)      ret ^= data[Index::WhiteCanCastleShort];
+    if (!flags.w_cant_castle_long) ret ^= data[Index::BlackCanCastleLong];
+    if (!flags.b_cant_castle)      ret ^= data[Index::WhiteCanCastleShort];
+    if (!flags.b_cant_castle_long) ret ^= data[Index::BlackCanCastleLong];
+    if (flags.to_move_color)       ret ^= data[Index::BlackToMove];
+    if (double_step_file)          ret ^= data[Index::DoubleStepPawnA + double_step_file - 1];
+    return ret;
+  }
+};
+
+struct Position : public BitBoardPosition {
+  Move move=0;
+  uint16_t move_number=0;
+  PositionFlags flags;
+  ZobristHasher::Hash hash;
+
+  Position() { Reset(); }
+  Position(const string &b) { if (!LoadFEN(b)) Reset(); }
+  void Assign(const Position &p) { *this = p; }
+  static Position FromByteBoard(const string &b) { Position p; p.LoadByteBoard(b); return p; }
+  bool operator==(const Position &p) const { return move == p.move && flags == p.flags && move_number == p.move_number &&
+    !memcmp(white, p.white, sizeof(white)) && !memcmp(black, p.black, sizeof(black)); }
+
+  void Reset() {
+    move = 0;
+    move_number = 0;
+    memzero(flags);
+    hash = 0;
+    SetInitialPosition();
+  }
+
+  int NextMoveNumber() const { return move_number ? ((move_number + 2) / 2) : 1; }
+  int StandardMoveNumber() const { return move_number ? ((move_number + 1) / 2) : 1; }
+  const char *StandardMoveSuffix() const { return flags.to_move_color ? "" : "..."; }
 
   string GetFEN() const {
     char null_count = 0;
@@ -365,7 +556,7 @@ struct Position {
     Piece capture = last_position.GetSquare(capture_square);
     if (capture) ClearSquare(capture_square, move_color != WHITE, move_color != BLACK);
     if (piece == KING && abs(SquareX(end_square) - SquareX(start_square)) > 1) 
-      ApplyValidatedCastles(move_color, end_square);
+      MoveRookForCastles(move_color, end_square);
     if (piece == PAWN && SquareY(end_square) == (move_color ? 0 : 7)) {
       promotion = QUEEN;
       ClearSquare(end_square, move_color == WHITE, move_color == BLACK);
@@ -382,28 +573,13 @@ struct Position {
       uint8_t capture_square = (m & MoveFlag::EnPassant) ? (square_to + 8 * (color ? 1 : -1)) : square_to;
       ClearSquareOfKnownPiece(capture_square, captured, !color);
     }
-    if (m & MoveFlag::Castle)                 ApplyValidatedCastles(color, square_to);
+    if (m & MoveFlag::Castle)                 MoveRookForCastles(color, square_to);
     if (auto promotion = GetMovePromotion(m)) SetSquare(square_to, GetPiece(color, promotion));
     else                                      SetSquare(square_to, piece);
     move = m;
     move_number++;
     flags.to_move_color = !color;
-    UpdateFlags(color, piece_type, square_from, square_to, captured);
-  }
-
-  void ApplyValidatedCastles(bool color, int8_t square_to) {
-    uint8_t rook_from, rook_to; 
-    switch(square_to) {
-      case g1: rook_from = h1; rook_to = f1; break;
-      case g8: rook_from = h8; rook_to = f8; break;
-      case c1: rook_from = a1; rook_to = d1; break;
-      case c8: rook_from = a8; rook_to = d8; break;
-      default: FATAL("invalid castle");      break;
-    }
-    uint8_t rook = ClearSquareOfKnownPiece(rook_from, ROOK, color);
-    DEBUG_CHECK_EQ(int(GetPiece(color, ROOK)), int(rook));
-    DEBUG_CHECK_EQ(int(GetPiece(WHITE, 0)), int(GetSquare(rook_to)));
-    SetSquare(rook_to, rook);
+    flags.UpdateForMove(color, piece_type, square_from, square_to, captured);
   }
 
   void UpdateMove(bool new_move, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured,
@@ -417,64 +593,11 @@ struct Position {
       move_flags |= MoveFlag::Check;
 
     move = Chess::GetMove(piece_type, square_from, square_to, captured, promotion, move_flags);
-    if (!new_move) return;
-    UpdateFlags(piece_color, piece_type, square_from, square_to, captured);
+    if (new_move) flags.UpdateForMove(piece_color, piece_type, square_from, square_to, captured);
   }
 
-  void UpdateFlags(bool piece_color, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured) {
-    if (piece_color == WHITE) {
-      if      (square_from == e1) flags.w_cant_castle = flags.w_cant_castle_long = true;
-      else if (square_from == h1) flags.w_cant_castle = true;
-      else if (square_from == a1) flags.w_cant_castle_long = true;
-      if      (square_to   == a8) flags.b_cant_castle_long = true;
-      else if (square_to   == h8) flags.b_cant_castle = true;
-    } else {
-      if      (square_from == e8) flags.b_cant_castle = flags.b_cant_castle_long = true;
-      else if (square_from == h8) flags.b_cant_castle = true;
-      else if (square_from == a8) flags.b_cant_castle_long = true;
-      if      (square_to   == a1) flags.w_cant_castle_long = true;
-      else if (square_to   == h1) flags.w_cant_castle = true;
-    }
-    if (captured || piece_type == PAWN) flags.fifty_move_rule_count = 0;
-    else                                flags.fifty_move_rule_count++;
-  }
-
-  BitBoard AllPieces() const { return white[ALL] | black[ALL]; }
-  const BitBoard *Pieces(bool color) const { return color ? black : white; }
-  /**/  BitBoard *Pieces(bool color)       { return color ? black : white; }
-
-  void SetAll(bool color) {
-    BitBoard *pieces = Pieces(color);
-    pieces[ALL] = pieces[PAWN] | pieces[KNIGHT] | pieces[BISHOP] | pieces[ROOK] | pieces[QUEEN] | pieces[KING];
-  }
-
-  void SetSquare(int s, Piece piece) {
-    BitBoard mask = SquareMask(s);
-    uint8_t piece_color = GetPieceColor(piece), piece_type = GetPieceType(piece);
-    DEBUG_CHECK_RANGE(piece_type, PAWN, END_PIECES);
-    if (piece_color) { black[piece_type] |= mask; black[0] |= mask; }
-    else             { white[piece_type] |= mask; white[0] |= mask; }
-  }
-
-  Piece GetSquare(int s, bool get_white=true, bool get_black=true, bool maybe_empty=true) const {
-    BitBoard mask = SquareMask(s);
-    if (get_white) { if (!maybe_empty || (mask & white[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (white[i] & mask) return GetPiece(WHITE, i); }
-    if (get_black) { if (!maybe_empty || (mask & black[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (black[i] & mask) return GetPiece(BLACK, i); }
-    return GetPiece(WHITE, 0);
-  }
-
-  Piece ClearSquare(int s, bool clear_white=true, bool clear_black=true, bool maybe_empty=true) {
-    BitBoard mask = SquareMask(s);
-    if (clear_white) { if (!maybe_empty || (mask & white[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (white[i] & mask) { white[0] &= ~mask; white[i] &= ~mask; return GetPiece(WHITE, i); } }
-    if (clear_black) { if (!maybe_empty || (mask & black[0])) for (int i=PAWN; i!=END_PIECES; ++i) if (black[i] & mask) { black[0] &= ~mask; black[i] &= ~mask; return GetPiece(BLACK, i); } }
-    return GetPiece(WHITE, 0);
-  }
-
-  Piece ClearSquareOfKnownPiece(int s, int t, bool color) {
-    BitBoard mask = SquareMask(s);
-    if (color) { black[0] &= ~mask; black[t] &= ~mask; return GetPiece(BLACK, t); }
-    else       { white[0] &= ~mask; white[t] &= ~mask; return GetPiece(WHITE, t); }
-    return GetPiece(WHITE, 0);
+  BitBoard PawnMoves(int p, bool black) const {
+    return PawnAdvances(p, black) | PawnCaptures(p, black) | PawnEnPassant(p, black);
   }
   
   BitBoard PawnEnPassant(int p, bool black) const {
@@ -486,52 +609,9 @@ struct Position {
     else                         return 0;
   }
 
-  BitBoard PawnAttacks(int p, bool black) const {
-    return black ? black_pawn_attack_mask[p] : white_pawn_attack_mask[p];
-  }
-
-  BitBoard PawnCaptures(int p, bool black) const {
-    return black ? (black_pawn_attack_mask[p] & Pieces(!black)[ALL])
-                 : (white_pawn_attack_mask[p] & Pieces(!black)[ALL]);
-  }
-
-  BitBoard SingleStepPawnAdvances(int p, bool black) const {
-    return (black ? (SquareMask(p) >> 8) : (SquareMask(p) << 8)) & ~AllPieces();
-  }
-
-  BitBoard DoubleStepPawnAdvances(int p, bool black) const {
-    if (black) { if (SquareY(p) == 6) if ((black_pawn_occupancy_mask[p] & AllPieces()) == 0) return SquareMask(p-16); }
-    else       { if (SquareY(p) == 1) if ((white_pawn_occupancy_mask[p] & AllPieces()) == 0) return SquareMask(p+16); }
-    return 0;
-  }
-
-  BitBoard PawnAdvances(int p, bool black) const {
-    return SingleStepPawnAdvances(p, black) | DoubleStepPawnAdvances(p, black);
-  }
-
-  BitBoard PawnMoves(int p, bool black) const {
-    return PawnAdvances(p, black) | PawnCaptures(p, black) | PawnEnPassant(p, black);
-  }
-
-  BitBoard KnightMoves(int p, bool black) const {
-    return knight_occupancy_mask[p] & ~Pieces(black)[ALL];
-  }
-
-  BitBoard BishopMoves(int p, bool black) const {
-    static MagicMoves *magic_moves = Singleton<MagicMoves>::Get();
-    BitBoard blockers = AllPieces() & bishop_occupancy_mask[p];
-    return magic_moves->BishopMoves(p, blockers, Pieces(black)[ALL]);
-  }
-
-  BitBoard RookMoves(int p, bool black) const {
-    static MagicMoves *magic_moves = Singleton<MagicMoves>::Get();
-    BitBoard blockers = AllPieces() & rook_occupancy_mask[p];
-    int magic_index = MagicMoves::MagicHash(p, blockers, rook_magic_number, rook_magic_number_bits);
-    return magic_moves->rook_magic_moves[p][magic_index] & ~Pieces(black)[ALL];
-  }
-
-  BitBoard QueenMoves(int p, bool black) const {
-    return RookMoves(p, black) | BishopMoves(p, black);
+  BitBoard KingMoves(int p, bool black, BitBoard attacked) const {
+    return (king_occupancy_mask[p] & ~Pieces(black)[ALL] & ~attacked)
+      | KingCastles(p, black, attacked) | KingLongCastles(p, black, attacked);
   }
 
   BitBoard KingShortCastles(int p, bool black, BitBoard attacked) const {
@@ -561,17 +641,6 @@ struct Position {
     return ret;
   }
 
-  BitBoard NormalKingMoves(int p, bool black, BitBoard attacked) const {
-    return king_occupancy_mask[p] & ~Pieces(black)[ALL] & ~attacked;
-  }
-
-  BitBoard KingMoves(int p, bool black, BitBoard attacked) const {
-    return (king_occupancy_mask[p] & ~Pieces(black)[ALL] & ~attacked)
-      | KingCastles(p, black, attacked) | KingLongCastles(p, black, attacked);
-  }
-
-  BitBoard KingAttacks(int p, bool black) const { return king_occupancy_mask[p]; }
-
   BitBoard PieceMoves(int piece, int square, bool black, BitBoard attacked=0) const {
     if      (piece == PAWN)   return PawnMoves  (square, black);
     else if (piece == KNIGHT) return KnightMoves(square, black);
@@ -595,28 +664,6 @@ struct Position {
     else if (piece == ROOK)   return RookMoves  (square, black);
     else if (piece == QUEEN)  return QueenMoves (square, black);
     else                      FATAL("unknown piece ", piece);
-  }
-
-  BitBoard PieceAttacks(int piece, int square, bool black) const {
-    if      (piece == PAWN)   return PawnAttacks(square, black);
-    else if (piece == KNIGHT) return KnightMoves(square, black);
-    else if (piece == BISHOP) return BishopMoves(square, black);
-    else if (piece == ROOK)   return RookMoves  (square, black);
-    else if (piece == QUEEN)  return QueenMoves (square, black);
-    else if (piece == KING)   return KingAttacks(square, black);
-    else                      FATAL("unknown piece ", piece);
-  }
-
-  BitBoard AllAttacks(bool color) const {
-    BitBoard ret = 0;
-    for (int piece_type = PAWN; piece_type != END_PIECES; ++piece_type)
-      for (SquareIter p(Pieces(color)[piece_type]); p; ++p)
-        ret |= PieceAttacks(piece_type, p.GetSquare(), color);
-    return ret;
-  }
-
-  bool InCheck(bool color, BitBoard attacks) const {
-    return attacks & Pieces(color)[KING];
   }
 };
 
@@ -670,7 +717,7 @@ vector<Move> GenerateMoves(const Position &in, bool color, PieceCount *piece_cou
           position.flags.to_move_color = !color;
 
           if (piece_type == KING && abs(SquareX(square_to) - SquareX(square_from)) > 1) 
-            position.ApplyValidatedCastles(color, square_to);
+            position.MoveRookForCastles(color, square_to);
           if (piece_type == PAWN && SquareY(square_to) == (color ? 0 : 7)) {
             for (uint8_t promotion = QUEEN; promotion > PAWN; --promotion) {
               Position pos = position;
