@@ -36,7 +36,7 @@ enum { h1=0,  g1=1,  f1=2,  e1=3,  d1=4,  c1=5,  b1=6,  a1=7,
        h6=40, g6=41, f6=42, e6=43, d6=44, c6=45, b6=46, a6=47,
        h7=48, g7=49, f7=50, e7=51, d7=52, c7=53, b7=54, a7=55,
        h8=56, g8=57, f8=58, e8=59, d8=60, c8=61, b8=62, a8=63 };
-struct MoveFlag { enum { Killer=1<<10, Check=1<<9, Castle=1<<8, DoubleStepPawn=1<<7, EnPassant=1<<6 }; };
+struct MoveFlag { enum { Killer=1<<28, Check=1<<27, Castle=1<<26, DoubleStepPawn=1<<7, EnPassant=1<<6 }; };
 
 static int no_special_moves[] = { 0 };
 static int king_special_moves [] = { MoveFlag::Castle, 0 };
@@ -69,6 +69,7 @@ static const char kiwipete_byte_board[] =
 "PPPBBPPP\n"
 "R---K--R\n";
 
+static const char initial_fen[] = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";;
 static const char perft_pos3_fen[] = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -";
 static const char perft_pos4_fen[] = "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1";
 static const char perft_pos4_mirror_fen[] = "r2q1rk1/pP1p2pp/Q4n2/bbp1p3/Np6/1B3NBn/pPPP1PPP/R3K2R b KQ - 0 1";
@@ -206,17 +207,17 @@ BitBoard ByteBoardToBitBoard(const ByteBoard &buf, char piece) {
 namespace LFL {
 namespace Chess {
 
-inline uint8_t GetMovePieceType (Move move) { return (move >> 23) & 0x7; }
-inline uint8_t GetMoveFromSquare(Move move) { return (move >> 17) & 0x3f; }
-inline uint8_t GetMoveToSquare  (Move move) { return (move >> 11) & 0x3f; }
-inline uint8_t GetMoveCapture   (Move move) { return (move >> 26) & 0x7; }
+inline uint8_t GetMovePieceType (Move move) { return END_PIECES - ((move >> 20) & 0x7); }
+inline uint8_t GetMoveFromSquare(Move move) { return (move >> 14) & 0x3f; }
+inline uint8_t GetMoveToSquare  (Move move) { return (move >> 8) & 0x3f; }
+inline uint8_t GetMoveCapture   (Move move) { return (move >> 23) & 0x7; }
 inline uint8_t GetMovePromotion (Move move) { return (move >> 29) & 0x7; }
 inline string GetLongMoveName(Move move) { return StrCat(SquareName(GetMoveFromSquare(move)), SquareName(GetMoveToSquare(move))); }
-inline Move GetMoveFlagMask() { return 0x7ff; }
+inline Move GetMoveFlagMask() { return (0x7 << 26) | 0xff; }
 
-inline Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t promote, uint16_t flags) {
-  return ((promote & 7) << 29) | ((capture & 7) << 26) | ((piece & 7) << 23) | ((start_square & 0x3f) << 17) |
-    ((end_square & 0x3f) << 11) | (flags & GetMoveFlagMask());
+inline Move GetMove(uint8_t piece, uint8_t start_square, uint8_t end_square, uint8_t capture, uint8_t promote, uint32_t flags) {
+  return ((promote & 7) << 29) | ((capture & 7) << 23) | (((END_PIECES - piece) & 7) << 20) |
+    ((start_square & 0x3f) << 14) | ((end_square & 0x3f) << 8) | (flags & GetMoveFlagMask());
 }
   
 struct PieceCount { 
@@ -247,24 +248,6 @@ struct PositionFlags {
     return fifty_move_rule_count == p.fifty_move_rule_count && to_move_color == p.to_move_color &&
       w_cant_castle == p.w_cant_castle && b_cant_castle == p.b_cant_castle &&
       w_cant_castle_long == p.w_cant_castle_long && b_cant_castle_long == p.b_cant_castle_long;
-  }
-
-  void UpdateForMove(bool piece_color, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured) {
-    if (piece_color == WHITE) {
-      if      (square_from == e1) w_cant_castle = w_cant_castle_long = true;
-      else if (square_from == h1) w_cant_castle = true;
-      else if (square_from == a1) w_cant_castle_long = true;
-      if      (square_to   == a8) b_cant_castle_long = true;
-      else if (square_to   == h8) b_cant_castle = true;
-    } else {
-      if      (square_from == e8) b_cant_castle = b_cant_castle_long = true;
-      else if (square_from == h8) b_cant_castle = true;
-      else if (square_from == a8) b_cant_castle_long = true;
-      if      (square_to   == a1) w_cant_castle_long = true;
-      else if (square_to   == h1) w_cant_castle = true;
-    }
-    if (captured || piece_type == PAWN) fifty_move_rule_count = 0;
-    else                                fifty_move_rule_count++;
   }
 };
 
@@ -334,21 +317,6 @@ struct BitBoardPosition {
     if (color) { black[0] &= ~mask; black[t] &= ~mask; return GetPiece(BLACK, t); }
     else       { white[0] &= ~mask; white[t] &= ~mask; return GetPiece(WHITE, t); }
     return GetPiece(WHITE, 0);
-  }
-
-  void MoveRookForCastles(bool color, int8_t square_to) {
-    uint8_t rook_from, rook_to; 
-    switch(square_to) {
-      case g1: rook_from = h1; rook_to = f1; break;
-      case g8: rook_from = h8; rook_to = f8; break;
-      case c1: rook_from = a1; rook_to = d1; break;
-      case c8: rook_from = a8; rook_to = d8; break;
-      default: FATAL("invalid castle");      break;
-    }
-    uint8_t rook = ClearSquareOfKnownPiece(rook_from, ROOK, color);
-    DEBUG_CHECK_EQ(int(GetPiece(color, ROOK)), int(rook));
-    DEBUG_CHECK_EQ(int(GetPiece(WHITE, 0)), int(GetSquare(rook_to)));
-    SetSquare(rook_to, rook);
   }
 
   BitBoard PawnAttacks(int p, bool black) const {
@@ -426,17 +394,12 @@ struct BitBoardPosition {
 
 struct ZobristHasher {
   typedef uint64_t Hash;
-  struct Index {
-    enum { BlackToMove=0, WhiteCanCastleShort=1, WhiteCanCastleLong=2,
-      BlackCanCastleShort=3, BlackCanCastleLong=4, DoubleStepPawnA=5, End=13 };
-    static int PieceSquareIndex(bool color, uint8_t piece_type, uint8_t square) {
-      return 64 * ((color * 6) + (piece_type - 1)) + square;
-    }
-  };
+  enum { BlackToMove=0, WhiteCanCastleShort=1, WhiteCanCastleLong=2,
+    BlackCanCastleShort=3, BlackCanCastleLong=4, DoubleStepPawnA=5, End=13 };
 
   vector<Hash> data;
   Hash initial_position_hash;
-  ZobristHasher() : data(12*64 + Index::End) {
+  ZobristHasher() : data(12*64 + End) {
     for (auto &v : data) v = Rand<Hash>(); 
     BitBoardPosition ip;
     ip.SetInitialPosition();
@@ -450,14 +413,18 @@ struct ZobristHasher {
     for (uint8_t color = 0; color != 2; ++color)
       for (uint8_t piece_type = PAWN; piece_type != END_PIECES; ++piece_type)
         for (SquareIter p(in.Pieces(color)[piece_type]); p; ++p)
-          ret ^= data[Index::PieceSquareIndex(color, piece_type, p.GetSquare())];
-    if (!flags.w_cant_castle)      ret ^= data[Index::WhiteCanCastleShort];
-    if (!flags.w_cant_castle_long) ret ^= data[Index::BlackCanCastleLong];
-    if (!flags.b_cant_castle)      ret ^= data[Index::WhiteCanCastleShort];
-    if (!flags.b_cant_castle_long) ret ^= data[Index::BlackCanCastleLong];
-    if (flags.to_move_color)       ret ^= data[Index::BlackToMove];
-    if (double_step_file)          ret ^= data[Index::DoubleStepPawnA + double_step_file - 1];
+          ret ^= data[PieceSquareIndex(color, piece_type, p.GetSquare())];
+    if (!flags.w_cant_castle)      ret ^= data[WhiteCanCastleShort];
+    if (!flags.w_cant_castle_long) ret ^= data[WhiteCanCastleLong];
+    if (!flags.b_cant_castle)      ret ^= data[BlackCanCastleShort];
+    if (!flags.b_cant_castle_long) ret ^= data[BlackCanCastleLong];
+    if (flags.to_move_color)       ret ^= data[BlackToMove];
+    if (double_step_file)          ret ^= data[DoubleStepPawnA + double_step_file - 1];
     return ret;
+  }
+
+  static int PieceSquareIndex(bool color, uint8_t piece_type, uint8_t square) {
+    return 64 * ((color * 6) + (piece_type - 1)) + square;
   }
 };
 
@@ -469,18 +436,20 @@ struct Position : public BitBoardPosition {
 
   Position() { Reset(); }
   Position(const string &b) { if (!LoadFEN(b)) Reset(); }
-  void Assign(const Position &p) { *this = p; }
   static Position FromByteBoard(const string &b) { Position p; p.LoadByteBoard(b); return p; }
-  bool operator==(const Position &p) const { return move == p.move && flags == p.flags && move_number == p.move_number &&
-    !memcmp(white, p.white, sizeof(white)) && !memcmp(black, p.black, sizeof(black)); }
 
+  void Assign(const Position &p) { *this = p; }
   void Reset() {
     move = 0;
     move_number = 0;
     memzero(flags);
     hash = 0;
     SetInitialPosition();
+    hash = Singleton<ZobristHasher>::Get()->initial_position_hash;
   }
+
+  bool operator==(const Position &p) const { return move == p.move && flags == p.flags && move_number == p.move_number &&
+    !memcmp(white, p.white, sizeof(white)) && !memcmp(black, p.black, sizeof(black)); }
 
   int NextMoveNumber() const { return move_number ? ((move_number + 2) / 2) : 1; }
   int StandardMoveNumber() const { return move_number ? ((move_number + 1) / 2) : 1; }
@@ -507,6 +476,7 @@ struct Position : public BitBoardPosition {
   }
 
   bool LoadFEN(const string &b) {
+    move = 0;
     memzero(white);
     memzero(black);
     bool piece_color;
@@ -523,6 +493,8 @@ struct Position : public BitBoardPosition {
       else                  white[piece_type] |= (1ULL << (y*8 + x--));
     }
     if (y != 0 || x != -1 || p == e) return false;
+    SetAll(WHITE);
+    SetAll(BLACK);
     vector<string> args;
     int ind = p - b.begin();
     Split(StringPiece(b.data() + ind, b.size() - ind), isspace, nullptr, &args);
@@ -533,67 +505,8 @@ struct Position : public BitBoardPosition {
     flags.b_cant_castle      = !(args.size() > 1 && strchr(args[1].data(), 'k'));
     flags.fifty_move_rule_count = args.size() > 3 ? atoi(args[3]) : 0;
     move_number = args.size() > 4 ? (atoi(args[4])*2 - !flags.to_move_color - 1) : 0;
-    move = 0;
-    SetAll(WHITE);
-    SetAll(BLACK);
+    hash = Singleton<ZobristHasher>::Get()->GetHash(*this, flags, 0);
     return true;
-  }
-
-  bool PlayerIllegalMove(int8_t piece, int8_t start_square, int8_t end_square, const Position &last_position) const {
-    bool move_color = flags.to_move_color;
-    return GetPieceColor(last_position.GetSquare(start_square)) != move_color ||
-      !(SquareMask(end_square) & last_position.PieceMoves
-        (piece, start_square, move_color, last_position.AllAttacks(!move_color)));
-  }
-
-  void PlayerMakeMove(int8_t piece, int8_t start_square, int8_t end_square, const Position &last_position) {
-    bool move_color = flags.to_move_color;
-    move_number++;
-    flags.to_move_color = move_number & 1;
-    bool en_passant = piece == PAWN && SquareX(start_square) != SquareX(end_square) &&
-      !GetPieceType(last_position.GetSquare(end_square));
-    uint8_t promotion = 0, capture_square = en_passant ? (end_square + 8 * (move_color ? 1 : -1)) : end_square;
-    Piece capture = last_position.GetSquare(capture_square);
-    if (capture) ClearSquare(capture_square, move_color != WHITE, move_color != BLACK);
-    if (piece == KING && abs(SquareX(end_square) - SquareX(start_square)) > 1) 
-      MoveRookForCastles(move_color, end_square);
-    if (piece == PAWN && SquareY(end_square) == (move_color ? 0 : 7)) {
-      promotion = QUEEN;
-      ClearSquare(end_square, move_color == WHITE, move_color == BLACK);
-      SetSquare(end_square, GetPiece(move_color, promotion));
-    }
-    UpdateMove(true, piece, start_square, end_square, capture, promotion, en_passant ? MoveFlag::EnPassant : 0);
-  }
-
-  void ApplyValidatedMove(Move m) {
-    bool color = flags.to_move_color;
-    int8_t square_from = GetMoveFromSquare(m), square_to = GetMoveToSquare(m), piece_type = GetMovePieceType(m), captured;
-    Piece piece = ClearSquareOfKnownPiece(square_from, piece_type, color);
-    if ((captured = GetMoveCapture(m))) {
-      uint8_t capture_square = (m & MoveFlag::EnPassant) ? (square_to + 8 * (color ? 1 : -1)) : square_to;
-      ClearSquareOfKnownPiece(capture_square, captured, !color);
-    }
-    if (m & MoveFlag::Castle)                 MoveRookForCastles(color, square_to);
-    if (auto promotion = GetMovePromotion(m)) SetSquare(square_to, GetPiece(color, promotion));
-    else                                      SetSquare(square_to, piece);
-    move = m;
-    move_number++;
-    flags.to_move_color = !color;
-    flags.UpdateForMove(color, piece_type, square_from, square_to, captured);
-  }
-
-  void UpdateMove(bool new_move, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured,
-                  uint8_t promotion, uint16_t move_flags) {
-    bool piece_color = (move_number & 1) == 0;
-    DEBUG_CHECK_EQ(GetPiece(piece_color, promotion ? promotion : piece_type), GetSquare(square_to));
-
-    if (piece_type == PAWN && abs(SquareY(square_to) - SquareY(square_from)) == 2)
-      move_flags |= MoveFlag::DoubleStepPawn;
-    if (InCheck(!piece_color, AllAttacks(piece_color)))
-      move_flags |= MoveFlag::Check;
-
-    move = Chess::GetMove(piece_type, square_from, square_to, captured, promotion, move_flags);
-    if (new_move) flags.UpdateForMove(piece_color, piece_type, square_from, square_to, captured);
   }
 
   BitBoard PawnMoves(int p, bool black) const {
@@ -664,6 +577,111 @@ struct Position : public BitBoardPosition {
     else if (piece == ROOK)   return RookMoves  (square, black);
     else if (piece == QUEEN)  return QueenMoves (square, black);
     else                      FATAL("unknown piece ", piece);
+  }
+
+  bool PlayerIllegalMove(int8_t piece, int8_t start_square, int8_t end_square, const Position &last_position) const {
+    bool move_color = flags.to_move_color;
+    return GetPieceColor(last_position.GetSquare(start_square)) != move_color ||
+      !(SquareMask(end_square) & last_position.PieceMoves
+        (piece, start_square, move_color, last_position.AllAttacks(!move_color)));
+  }
+
+  void PlayerMakeMove(int8_t piece, int8_t start_square, int8_t end_square, const Position &last_position) {
+    static const vector<ZobristHasher::Hash> &zobrist = Singleton<ZobristHasher>::Get()->data;
+    bool move_color = flags.to_move_color;
+    move_number++;
+    flags.to_move_color = move_number & 1;
+    bool en_passant = piece == PAWN && SquareX(start_square) != SquareX(end_square) &&
+      !GetPieceType(last_position.GetSquare(end_square));
+    uint8_t promotion = 0, capture_square = en_passant ? (end_square + 8 * (move_color ? 1 : -1)) : end_square;
+    Piece capture = last_position.GetSquare(capture_square);
+    if (capture) {
+      ClearSquare(capture_square, move_color != WHITE, move_color != BLACK);
+      hash ^= zobrist[ZobristHasher::PieceSquareIndex(!move_color, GetPieceType(capture), capture_square)];
+    }
+    if (piece == KING && abs(SquareX(end_square) - SquareX(start_square)) > 1) 
+      MoveRookForCastles(move_color, end_square);
+    if (piece == PAWN && SquareY(end_square) == (move_color ? 0 : 7)) {
+      promotion = QUEEN;
+      ClearSquare(end_square, move_color == WHITE, move_color == BLACK);
+      SetSquare(end_square, GetPiece(move_color, promotion));
+    }
+    hash ^= zobrist[ZobristHasher::BlackToMove] ^
+      zobrist[ZobristHasher::PieceSquareIndex(move_color, piece, start_square)] ^
+      zobrist[ZobristHasher::PieceSquareIndex(move_color, promotion ? promotion : piece, end_square)];
+    UpdateMove(true, piece, start_square, end_square, capture, promotion, en_passant ? MoveFlag::EnPassant : 0);
+  }
+
+  void UpdateMove(bool new_move, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured,
+                  uint8_t promotion, uint32_t move_flags) {
+    bool piece_color = (move_number & 1) == 0;
+    DEBUG_CHECK_EQ(GetPiece(piece_color, promotion ? promotion : piece_type), GetSquare(square_to));
+
+    if (piece_type == PAWN && abs(SquareY(square_to) - SquareY(square_from)) == 2)
+      move_flags |= MoveFlag::DoubleStepPawn;
+    if (InCheck(!piece_color, AllAttacks(piece_color)))
+      move_flags |= MoveFlag::Check;
+
+    move = Chess::GetMove(piece_type, square_from, square_to, captured, promotion, move_flags);
+    if (new_move) UpdateFlagsForMove(piece_color, piece_type, square_from, square_to, captured);
+  }
+
+  void ApplyValidatedMove(Move m) {
+    static const vector<ZobristHasher::Hash> &zobrist = Singleton<ZobristHasher>::Get()->data;
+    bool color = flags.to_move_color;
+    int8_t square_from = GetMoveFromSquare(m), square_to = GetMoveToSquare(m);
+    int8_t piece_type = GetMovePieceType(m), promotion = GetMovePromotion(m), captured;
+    Piece piece = ClearSquareOfKnownPiece(square_from, piece_type, color);
+    if ((captured = GetMoveCapture(m))) {
+      uint8_t capture_square = (m & MoveFlag::EnPassant) ? (square_to + 8 * (color ? 1 : -1)) : square_to;
+      ClearSquareOfKnownPiece(capture_square, captured, !color);
+      hash ^= zobrist[ZobristHasher::PieceSquareIndex(!color, captured, capture_square)];
+    }
+    if (m & MoveFlag::Castle) MoveRookForCastles(color, square_to);
+    SetSquare(square_to, promotion ? GetPiece(color, promotion) : piece);
+    move = m;
+    move_number++;
+    flags.to_move_color = !color;
+    UpdateFlagsForMove(color, piece_type, square_from, square_to, captured);
+    hash ^= zobrist[ZobristHasher::BlackToMove] ^
+      zobrist[ZobristHasher::PieceSquareIndex(color, piece_type, square_from)] ^
+      zobrist[ZobristHasher::PieceSquareIndex(color, promotion ? promotion : piece_type, square_to)];
+  }
+
+  void MoveRookForCastles(bool color, int8_t square_to) {
+    static const vector<ZobristHasher::Hash> &zobrist = Singleton<ZobristHasher>::Get()->data;
+    uint8_t rook_from, rook_to; 
+    switch(square_to) {
+      case g1: rook_from = h1; rook_to = f1; break;
+      case g8: rook_from = h8; rook_to = f8; break;
+      case c1: rook_from = a1; rook_to = d1; break;
+      case c8: rook_from = a8; rook_to = d8; break;
+      default: FATAL("invalid castle");      break;
+    }
+    uint8_t rook = ClearSquareOfKnownPiece(rook_from, ROOK, color);
+    DEBUG_CHECK_EQ(int(GetPiece(color, ROOK)), int(rook));
+    DEBUG_CHECK_EQ(int(GetPiece(WHITE, 0)), int(GetSquare(rook_to)));
+    SetSquare(rook_to, rook);
+    hash ^= 
+      zobrist[ZobristHasher::PieceSquareIndex(color, ROOK, rook_from)] ^
+      zobrist[ZobristHasher::PieceSquareIndex(color, ROOK, rook_to)];
+  }
+
+  void UpdateFlagsForMove(bool piece_color, int8_t piece_type, int8_t square_from, int8_t square_to, int8_t captured) {
+    static const vector<ZobristHasher::Hash> &zobrist = Singleton<ZobristHasher>::Get()->data;
+    if (piece_color == WHITE) {
+      if (!flags.w_cant_castle      && (square_from == e1 || square_from == h1)) { flags.w_cant_castle      = true; hash ^= zobrist[ZobristHasher::WhiteCanCastleShort]; }
+      if (!flags.w_cant_castle_long && (square_from == e1 || square_from == a1)) { flags.w_cant_castle_long = true; hash ^= zobrist[ZobristHasher::WhiteCanCastleLong]; }
+      if      (!flags.b_cant_castle_long && square_to == a8)                     { flags.b_cant_castle_long = true; hash ^= zobrist[ZobristHasher::BlackCanCastleLong]; }
+      else if (!flags.b_cant_castle      && square_to == h8)                     { flags.b_cant_castle      = true; hash ^= zobrist[ZobristHasher::BlackCanCastleShort]; }
+    } else {
+      if (!flags.b_cant_castle      && (square_from == e8 || square_from == h8)) { flags.b_cant_castle      = true; hash ^= zobrist[ZobristHasher::BlackCanCastleShort]; }
+      if (!flags.b_cant_castle_long && (square_from == e8 || square_from == a8)) { flags.b_cant_castle_long = true; hash ^= zobrist[ZobristHasher::BlackCanCastleLong]; }
+      if      (!flags.w_cant_castle_long && square_to == a1)                     { flags.w_cant_castle_long = true; hash ^= zobrist[ZobristHasher::WhiteCanCastleLong]; }
+      else if (!flags.w_cant_castle      && square_to == h1)                     { flags.w_cant_castle      = true; hash ^= zobrist[ZobristHasher::WhiteCanCastleShort]; }
+    }
+    if (captured || piece_type == PAWN) flags.fifty_move_rule_count = 0;
+    else                                flags.fifty_move_rule_count++;
   }
 };
 
@@ -763,24 +781,8 @@ float StaticEvaluation(Position in) {
     mobility_weight * (int(white_moves.size())          - int(black_moves.size()));
 }
 
-inline bool BasicMoveSort(Move l, Move r) {
-  return r < l;
-}
-
-inline bool MoveSort(Move l, Move r) {
-  if (GetMoveCapture(l)) {
-    if (!GetMoveCapture(r)) return true;
-    else return BasicMoveSort(l, r);
-  } else if (GetMoveCapture(r)) return false;
-  else if (l & MoveFlag::Check) {
-    if (!(r & MoveFlag::Check)) return true;
-    else return BasicMoveSort(l, r);
-  } else return BasicMoveSort(l, r);
-}
-
-bool PositionMoveSort(const Position &l, const Position &r) {
-  return MoveSort(l.move, r.move);
-}
+inline bool MoveSort(Move l, Move r) { return r < l; }
+inline bool PositionMoveSort(const Position &l, const Position &r) { return MoveSort(l.move, r.move); }
 
 void FullSearch(Position in, bool color, SearchStats *stats, int depth=0, SearchStats::Total *divide=0) {
   auto moves = GenerateMoves(in, color);

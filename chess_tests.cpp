@@ -250,7 +250,6 @@ TEST(BoardTest, ByteBoard) {
 }
 
 TEST(BoardTest, ForsythEdwardsNotation) {
-  string initial_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   Chess::Position initial, position;
   EXPECT_EQ(true, position.LoadFEN(initial_fen));
   EXPECT_EQ(initial_byte_board, position.GetByteBoard());
@@ -343,6 +342,62 @@ TEST(MoveTest, Encoding) {
     EXPECT_EQ(double_step, ((move & MoveFlag::DoubleStepPawn) != 0));
     EXPECT_EQ(enpassant,   ((move & MoveFlag::EnPassant)      != 0));
   }
+}
+
+#if 0
+TEST(MoveTest, Sorting) {
+  Position position;
+  EXPECT_EQ(true, position.LoadFEN("5r2/p1NP1ppn/5kn1/K1Q2N2/4br2/2p2p2/2B5/2B1R1R1 w - - 0 40"));
+  auto moves = GenerateMoves(position, position.flags.to_move_color);
+  sort(moves.begin(), moves.end(), MoveSort);
+  for (auto &m : moves) INFO(GetLongMoveName(m));
+}
+#endif
+
+TEST(MoveTest, Hashing) {
+  Position position;
+  static const vector<ZobristHasher::Hash> &zobrist = Singleton<ZobristHasher>::Get()->data;
+  EXPECT_EQ(Singleton<ZobristHasher>::Get()->initial_position_hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, e2, e4, 0, 0, MoveFlag::DoubleStepPawn));
+  EXPECT_EQ(Position("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, e7, e5, 0, 0, MoveFlag::DoubleStepPawn));
+  EXPECT_EQ(Position("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(KNIGHT, g1, f3, 0, 0, 0));
+  EXPECT_EQ(Position("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 0 2").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(KNIGHT, b8, c6, 0, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 2").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(BISHOP, f1, b5, 0, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 3").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, a7, a6, 0, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 3").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(BISHOP, b5, c6, KNIGHT, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/1ppp1ppp/p1B5/4p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 4").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, d7, c6, BISHOP, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2ppp/p1p5/4p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(KING, e1, g1, 0, 0, MoveFlag::Castle));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2ppp/p1p5/4p3/4P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 0 5").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, c6, c5, 0, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2ppp/p7/2p1p3/4P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 0 5").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(KNIGHT, f3, e5, PAWN, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2ppp/p7/2p1N3/4P3/8/PPPP1PPP/RNBQ1RK1 b kq - 0 6").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, c5, c4, 0, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2ppp/p7/4N3/2p1P3/8/PPPP1PPP/RNBQ1RK1 w kq - 0 6").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, d2, d4, 0, 0, MoveFlag::DoubleStepPawn));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2ppp/p7/4N3/2pPP3/8/PPP2PPP/RNBQ1RK1 b kq - 0 7").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, c4, d3, PAWN, 0, MoveFlag::EnPassant));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2ppp/p7/4N3/4P3/3p4/PPP2PPP/RNBQ1RK1 w kq - 0 7").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(KNIGHT, e5, f7, PAWN, 0, 0));
+  EXPECT_EQ(Position("r1bqkbnr/1pp2Npp/p7/8/4P3/3p4/PPP2PPP/RNBQ1RK1 b kq - 0 8").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(KING, e8, f7, KNIGHT, 0, 0));
+  EXPECT_EQ(Position("r1bq1bnr/1pp2kpp/p7/8/4P3/3p4/PPP2PPP/RNBQ1RK1 w - - 0 8").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, e4, e5, 0, 0, 0));
+  EXPECT_EQ(Position("r1bq1bnr/1pp2kpp/p7/4P3/8/3p4/PPP2PPP/RNBQ1RK1 b - - 0 9").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, d3, c2, PAWN, 0, 0));
+  EXPECT_EQ(Position("r1bq1bnr/1pp2kpp/p7/4P3/8/8/PPp2PPP/RNBQ1RK1 w - - 0 9").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(QUEEN, d1, d8, QUEEN, 0, 0));
+  EXPECT_EQ(Position("r1bQ1bnr/1pp2kpp/p7/4P3/8/8/PPp2PPP/RNB2RK1 b - - 0 10").hash, position.hash);
+  position.ApplyValidatedMove(GetMove(PAWN, c2, b1, KNIGHT, QUEEN, 0));
+  EXPECT_EQ(Position("r1bQ1bnr/1pp2kpp/p7/4P3/8/8/PP3PPP/RqB2RK1 w - - 0 10").hash, position.hash);
 }
 
 #define CHESS_PERFT_TESTS
