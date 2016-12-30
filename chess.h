@@ -824,7 +824,7 @@ struct Game {
   GamePosition position, last_position;
   vector<GamePosition> history;
   deque<GamePosition> premove;
-  bool active = 1, my_color = 0, flip_board = 0, engine_playing_white = 0, engine_playing_black = 0;
+  bool new_game = 1, active = 1, my_color = 0, flip_board = 0, engine_playing_white = 0, engine_playing_black = 0;
   int game_number = 0, history_ind = 0, p1_secs = 0, p2_secs = 0, last_p1_secs = 0, last_p2_secs = 0;
   int move_animate_from = -1, move_animate_to = -1;
   Time update_time, move_animation_start;

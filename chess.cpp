@@ -159,8 +159,7 @@ struct ChessGUI : public GUI {
       static SoundAsset *move_sound = app->soundasset("move"), *capture_sound = app->soundasset("capture");
       app->PlaySoundEffect(Chess::GetMoveCapture(game->position.move) ? capture_sound : move_sound);
     }
-    if (game->position.move_number == 0) {
-      game->my_color = chess_terminal->terminal->my_name == game->p1_name ? Chess::WHITE : Chess::BLACK;
+    if (game->new_game && !(game->new_game = 0)) {
       game->flip_board = game->my_color == Chess::BLACK;
     }
     if (reapply_premove) ReapplyPremoves(game);
@@ -288,12 +287,16 @@ struct ChessGUI : public GUI {
     }
 
     if (divider.changed) Layout();
-    if (win.w != W->width) { ScopedFillColor sfc(W->gd, Color::grey70); gc.DrawTexturedBox(Box(W->x, win.y, W->width, win.h)); }
+    if (win.w != W->width) { ScopedFillColor sfc(W->gd, Color::grey70); gc.DrawBox1(Box(W->x, win.y, W->width, win.h)); }
     Draw();
     DrawGame(W, game ? game : Singleton<Chess::Game>::Get(), now);
 
     W->gd->DisableBlend();
-    { Scissor s(W->gd, term); chess_terminal->terminal->Draw(term); }
+    {
+      Scissor s(W->gd, term);
+      chess_terminal->terminal->Draw(term);
+      if (chess_terminal->terminal->scrolled_lines) chess_terminal->DrawScrollBar(term);
+    }
     if (divider.changing) BoxOutline().Draw(&gc, Box::DelBorder(term, Border(1,1,1,1)));
 
     W->DrawDialogs();
@@ -368,11 +371,14 @@ struct ChessGUI : public GUI {
   }
 
   void ReapplyPremoves(Chess::Game *game) {
-    for (auto &pm : game->premove) {
-      auto pm_piece = game->position.ClearSquare(Chess::GetMoveFromSquare(pm.move));
-      game->position.SetSquare(Chess::GetMoveToSquare(pm.move), pm_piece);
-      pm.Assign(game->position);
+    auto b = game->premove.begin(), e = game->premove.end(), i = b;
+    for (/**/; i != e; ++i) {
+      auto pm_piece = game->position.ClearSquare(Chess::GetMoveFromSquare(i->move));
+      if (!Chess::GetPieceType(pm_piece)) break;
+      game->position.SetSquare(Chess::GetMoveToSquare(i->move), pm_piece);
+      i->Assign(game->position);
     }
+    if (i != e) game->premove.erase(i, e);
   }
 
   void UndoPremove(Window *W) {
@@ -427,7 +433,7 @@ void MyWindowStart(Window *W) {
   if (FLAGS_console) W->InitConsole(Callback());
   ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>(W));
   chess_gui->chess_terminal = make_unique<ChessTerminalTab>
-    (W, W->AddGUI(make_unique<FICSTerminal>(nullptr, W, W->default_font, chess_gui->term_dim)));
+    (W, W->AddGUI(make_unique<FICSTerminal>(nullptr, W, W->default_font, chess_gui->term_dim)), 0);
 
   W->reshaped_cb = bind(&ChessGUI::Reshaped, chess_gui);
   W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);

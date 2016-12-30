@@ -75,7 +75,8 @@ struct FICSTerminal : public ChessTerminal {
     Split(StringPiece::FromRemaining(s, 8*9), isspace, NULL, &args);
     if (args.size() < 23) return;
 
-    int game_no = atoi(args[7]);
+    int game_no = atoi(args[7]), game_relation = atoi(args[10]);
+    bool my_game = game_relation == 1 || game_relation == -1 || game_relation == 2;
     Chess::Game *game = get_game_cb(game_no);
     game->active = true;
     game->game_number = game_no;
@@ -88,6 +89,8 @@ struct FICSTerminal : public ChessTerminal {
     game->position.LoadByteBoard(s);
     game->position.flags.to_move_color = (args.size() && args[0] == "B");
     game->position.move_number = atoi(args[17])*2 - !game->position.flags.to_move_color - 1;
+    game->my_color = (game_relation ==  1 &&  game->position.flags.to_move_color) ||
+                     (game_relation == -1 && !game->position.flags.to_move_color);
 
     const string &move = args[18];
     int8_t piece_type, square_from, square_to;
@@ -117,7 +120,6 @@ struct FICSTerminal : public ChessTerminal {
       if (new_move) game->AddNewMove();
     }
 
-    bool my_game = game->p1_name == my_name || game->p2_name == my_name;
     bool my_move_now = game->position.flags.to_move_color == game->my_color;
     if (new_move && (!my_game || my_move_now)) game_update_cb(game, true, square_from, square_to);
     else                                       game_update_cb(game, true, -1, -1);
