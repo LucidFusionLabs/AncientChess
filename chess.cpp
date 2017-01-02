@@ -78,18 +78,29 @@ struct ChessGUI : public GUI {
     return Chess::SquareFromXY(flip_board ? (7-sx) : sx, flip_board ? (7-sy) : sy);
   }
 
+  void UseChessTerminalController(string hostport) {
+    INFO("connecting to ", hostport);
+    auto c = make_unique<NetworkTerminalController>
+      (chess_terminal.get(), hostport, bind(&ChessGUI::UseReconnectTerminalController, this, hostport));
+    c->frame_on_keyboard_input = true;
+    chess_terminal->ChangeController(move(c));
+    chess_terminal->terminal->controller = chess_terminal->controller.get();
+  }
+
+  void UseReconnectTerminalController(string hostport) {
+    auto c = make_unique<BufferedShellTerminalController>
+      (chess_terminal.get(), "\r\nConnection closed.\r\n", StringCB(), StringVecCB(),
+       bind(&ChessGUI::UseChessTerminalController, this, hostport), false);
+    c->enter_char = '\n';
+    chess_terminal->ChangeController(move(c));
+    chess_terminal->terminal->controller = chess_terminal->controller.get();
+  }
+
   void Open(const string &hostport) {
     Activate();
-    if (hostport.size()) {
-      INFO("connecting to ", hostport);
-      auto c = make_unique<NetworkTerminalController>
-        (chess_terminal.get(), hostport, bind(&ChessGUI::ClosedCB, this));
-      c->frame_on_keyboard_input = true;
-      chess_terminal->ChangeController(move(c));
-    }
+    if (hostport.size()) UseChessTerminalController(hostport);
 
     auto t = chess_terminal->terminal;
-    t->controller      = chess_terminal->controller.get();
 #ifdef LFL_MOBILE
     t->drag_cb         = [=](int, point, point, int d){ if (d) app->ToggleTouchKeyboard(); return true; }
 #endif
@@ -127,7 +138,6 @@ struct ChessGUI : public GUI {
     UpdateAnimating(root);
   }
 
-  void ClosedCB() { chess_terminal->terminal->Write("\r\nConnection closed.\r\n"); }
   void LoginCB() { root->SetCaption(StrCat(chess_terminal->terminal->my_name, " @ ", FLAGS_connect)); }
 
   void GameStartCB(int game_no) {
