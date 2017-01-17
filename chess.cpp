@@ -102,7 +102,7 @@ struct ChessGUI : public GUI {
 
     auto t = chess_terminal->terminal;
 #ifdef LFL_MOBILE
-    t->drag_cb         = [=](int, point, point, int d){ if (d) app->ToggleTouchKeyboard(); return true; }
+    t->drag_cb         = [=](int, point, point, int d){ if (d) app->ToggleTouchKeyboard(); return true; };
 #endif
     t->get_game_cb     = [=](int game_no){ return &game_map[game_no]; };
     t->illegal_move_cb = bind(&ChessGUI::IllegalMoveCB, this);
