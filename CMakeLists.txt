@@ -1,7 +1,7 @@
 # $Id: CMakeLists.txt 1320 2014-10-26 08:12:52Z justin $
 
 lfl_set_os_toolkit(CHESS)
-lfl_project(chess)
+lfl_project(chess com.lucidfusionlabs.LChess)
 lfl_add_package(chess SOURCES chess.cpp chess.rc
                 LINK_LIBRARIES ${LFL_APP_LIB} ${CHESS_FRAMEWORK} ${CHESS_GRAPHICS}
                 ${LFL_APP_AUDIO} app_null_camera app_null_matrix app_null_fft
@@ -12,13 +12,10 @@ set(LFL_APP_ASSET_FILES ${LFL_APP_ASSET_FILES} ${LFL_SOURCE_DIR}/core/app/assets
 set(LFL_APP_LIB_FILES ${LFL_APP_LIB_FILES} ${PORTAUDIO_LIB_FILES})
 set(CHESS_DEP)
 if(LFL_STOCKFISH)
-  set(CHESS_DEP ${CHESS_DEP} Stockfish)
+  add_dependencies(chess Stockfish)
   set(LFL_APP_ASSET_FILES ${LFL_APP_ASSET_FILES} ${STOCKFISH_BIN})
-else()
-  set(CHESS_DEP)
 endif()
 lfl_post_build_start(chess chess LChess)
-add_dependencies(chess ${CHESS_DEP})
 
 if(NOT LFL_MOBILE)
   lfl_add_target(lengine EXECUTABLE SOURCES engine.cpp

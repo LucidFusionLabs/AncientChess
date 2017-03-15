@@ -478,7 +478,7 @@ extern "C" void MyAppCreate(int argc, const char* const* argv) {
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
   app = new Application(argc, argv);
-  app->focused = new Window();
+  app->focused = Window::Create();
   my_app = new MyAppState();
   app->name = "LChess";
   app->window_start_cb = MyWindowStart;
@@ -537,12 +537,12 @@ extern "C" int MyAppMain() {
   app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
   app->soundasset.Load();
 
-  my_app->askseek = make_unique<SystemAlertView>(AlertItemVec{
+  my_app->askseek = SystemAlertView::Create(AlertItemVec{
     { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" }, { "Cancel", },
     { "Continue", "", bind([=](const string &a){ chess_gui->Send("seek " + (*seek_command = a)); }, _1)}
   });
 
-  my_app->askresign = make_unique<SystemAlertView>(AlertItemVec{
+  my_app->askresign = SystemAlertView::Create(AlertItemVec{
     { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" }, { "No" },
     { "Yes", "", bind([=](){ chess_gui->Send("resign"); })}
   });
@@ -552,7 +552,7 @@ extern "C" int MyAppMain() {
     MenuItem{ "u", "Undo pre-move",         bind(&ChessGUI::UndoPremove, chess_gui, app->focused)},
     MenuItem{ "",  "Copy PGN to clipboard", bind(&ChessGUI::CopyPGNToClipboard, chess_gui)}
   });
-  my_app->viewmenu = make_unique<SystemMenuView>("View", MenuItemVec{
+  my_app->viewmenu = SystemMenuView::Create("View", MenuItemVec{
     MenuItem{ "f",       "Flip board", bind(&ChessGUI::FlipBoard, chess_gui, app->focused)},
     MenuItem{ "<left>",  "Previous move" },
     MenuItem{ "<right>", "Next move" },
@@ -569,10 +569,10 @@ extern "C" int MyAppMain() {
       gamemenu.push_back(MenuItem{"", "Engine play white", bind(&ChessGUI::StartEngine, chess_gui, false) });
       gamemenu.push_back(MenuItem{"", "Engine play black", bind(&ChessGUI::StartEngine, chess_gui, true) });
     }
-    my_app->gamemenu = make_unique<SystemMenuView>("Game", move(gamemenu));
+    my_app->gamemenu = SystemMenuView::Create("Game", move(gamemenu));
   }
 #else
-  my_app->maintoolbar = make_unique<SystemToolbarView>(MenuItemVec{ 
+  my_app->maintoolbar = SystemToolbarView::Create(MenuItemVec{ 
     MenuItem{ "\U000025C0", "", bind(&ChessGUI::WalkHistory, chess_gui, true) },
     MenuItem{ "\U000025B6", "", bind(&ChessGUI::WalkHistory, chess_gui, false) },
     MenuItem{ "seek",       "", bind([=](){ my_app->askseek->Show(*seek_command); }) },

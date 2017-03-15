@@ -8,7 +8,7 @@ using namespace LFL::Chess;
 
 extern "C" void MyAppCreate(int argc, const char* const* argv) {
   app = new Application(argc, argv);
-  app->focused = new Window();
+  app->focused = Window::Create();
 }
 
 extern "C" int MyAppMain() {
