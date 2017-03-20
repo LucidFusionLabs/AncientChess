@@ -572,7 +572,7 @@ extern "C" int MyAppMain() {
     my_app->gamemenu = SystemMenuView::Create("Game", move(gamemenu));
   }
 #else
-  my_app->maintoolbar = SystemToolbarView::Create(MenuItemVec{ 
+  my_app->maintoolbar = SystemToolbarView::Create("", MenuItemVec{ 
     MenuItem{ "\U000025C0", "", bind(&ChessGUI::WalkHistory, chess_gui, true) },
     MenuItem{ "\U000025B6", "", bind(&ChessGUI::WalkHistory, chess_gui, false) },
     MenuItem{ "seek",       "", bind([=](){ my_app->askseek->Show(*seek_command); }) },
