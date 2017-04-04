@@ -37,9 +37,9 @@ DEFINE_string(engine, "", "Chess engine");
 struct MyAppState {
   point initial_board_dim = point(630, 630);
   point initial_term_dim = point(initial_board_dim.x / Fonts::InitFontWidth(), 10);
-  unique_ptr<SystemAlertView> askseek, askresign;
-  unique_ptr<SystemMenuView> editmenu, viewmenu, gamemenu;
-  unique_ptr<SystemToolbarView> maintoolbar;
+  unique_ptr<AlertViewInterface> askseek, askresign;
+  unique_ptr<MenuViewInterface> editmenu, viewmenu, gamemenu;
+  unique_ptr<ToolbarViewInterface> maintoolbar;
 } *my_app;
 
 struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
@@ -50,7 +50,7 @@ struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
   virtual void DrawBox(GraphicsDevice*, Box draw_box, bool check_resized) {}
 };
 
-struct ChessGUI : public GUI {
+struct ChessView : public View {
   unique_ptr<UniversalChessInterfaceEngine> chess_engine;
   unique_ptr<ChessTerminalTab> chess_terminal;
   point term_dim=my_app->initial_term_dim;
@@ -62,7 +62,7 @@ struct ChessGUI : public GUI {
   bool title_changed = 0, console_animating = 0;
   Time move_animation_time = Time(200);
   DragTracker drag_tracker;
-  ChessGUI(Window *W) : GUI(W), divider(this, true, W->width) { (top_game = &game_map[0])->active = 0; }
+  ChessView(Window *W) : View(W), divider(this, true, W->width) { (top_game = &game_map[0])->active = 0; }
 
   /**/  Chess::Game *Top()       { return top_game; }
   const Chess::Game *Top() const { return top_game; }
@@ -81,7 +81,7 @@ struct ChessGUI : public GUI {
   void UseChessTerminalController(string hostport) {
     INFO("connecting to ", hostport);
     auto c = make_unique<NetworkTerminalController>
-      (chess_terminal.get(), hostport, bind(&ChessGUI::UseReconnectTerminalController, this, hostport));
+      (chess_terminal.get(), hostport, bind(&ChessView::UseReconnectTerminalController, this, hostport));
     c->frame_on_keyboard_input = true;
     chess_terminal->ChangeController(move(c));
     chess_terminal->terminal->controller = chess_terminal->controller.get();
@@ -90,7 +90,7 @@ struct ChessGUI : public GUI {
   void UseReconnectTerminalController(string hostport) {
     auto c = make_unique<BufferedShellTerminalController>
       (chess_terminal.get(), "\r\nConnection closed.\r\n", StringCB(), StringVecCB(),
-       bind(&ChessGUI::UseChessTerminalController, this, hostport), false);
+       bind(&ChessView::UseChessTerminalController, this, hostport), false);
     c->enter_char = '\n';
     chess_terminal->ChangeController(move(c));
     chess_terminal->terminal->controller = chess_terminal->controller.get();
@@ -105,11 +105,11 @@ struct ChessGUI : public GUI {
     t->drag_cb         = [=](int, point, point, int d){ if (d) app->ToggleTouchKeyboard(); return true; };
 #endif
     t->get_game_cb     = [=](int game_no){ return &game_map[game_no]; };
-    t->illegal_move_cb = bind(&ChessGUI::IllegalMoveCB, this);
-    t->login_cb        = bind(&ChessGUI::LoginCB,       this);
-    t->game_start_cb   = bind(&ChessGUI::GameStartCB,   this, _1);
-    t->game_over_cb    = bind(&ChessGUI::GameOverCB,    this, _1, _2, _3, _4);
-    t->game_update_cb  = bind(&ChessGUI::GameUpdateCB,  this, _1, _2, _3, _4);
+    t->illegal_move_cb = bind(&ChessView::IllegalMoveCB, this);
+    t->login_cb        = bind(&ChessView::LoginCB,       this);
+    t->game_start_cb   = bind(&ChessView::GameStartCB,   this, _1);
+    t->game_over_cb    = bind(&ChessView::GameOverCB,    this, _1, _2, _3, _4);
+    t->game_update_cb  = bind(&ChessView::GameUpdateCB,  this, _1, _2, _3, _4);
     t->SetColors(Singleton<Terminal::StandardVGAColors>::Get());
   }
 
@@ -254,7 +254,7 @@ struct ChessGUI : public GUI {
   void Reshaped() { divider.size = root->width; }
   void Layout() {
     Font *font = chess_terminal->terminal->style.font;
-    ResetGUI();
+    ResetView();
     win = root->Box();
     term.w = win.w;
     term_dim.x = win.w / font->FixedWidth();
@@ -266,8 +266,8 @@ struct ChessGUI : public GUI {
     CHECK_EQ(win.w, win.h);
     board = Box::DelBorder(win, Border(5,5,5,5));
     square_dim = v2(board.w/8.0, board.h/8.0);
-    if (FLAGS_click_or_drag_pieces) mouse.AddClickBox(board, MouseController::CoordCB(bind(&ChessGUI::ClickCB, this, _1, _2, _3, _4)));
-    else                            mouse.AddDragBox (board, MouseController::CoordCB(bind(&ChessGUI::DragCB,  this, _1, _2, _3, _4)));
+    if (FLAGS_click_or_drag_pieces) mouse.AddClickBox(board, MouseController::CoordCB(bind(&ChessView::ClickCB, this, _1, _2, _3, _4)));
+    else                            mouse.AddDragBox (board, MouseController::CoordCB(bind(&ChessView::DragCB,  this, _1, _2, _3, _4)));
 
     Texture *board_tex = &app->asset("board1")->tex;
     child_box.PushBack(win, Drawable::Attr(board_tex), board_tex);
@@ -441,30 +441,30 @@ void MyWindowInit(Window *W) {
 
 void MyWindowStart(Window *W) {
   if (FLAGS_console) W->InitConsole(Callback());
-  ChessGUI *chess_gui = W->AddGUI(make_unique<ChessGUI>(W));
-  chess_gui->chess_terminal = make_unique<ChessTerminalTab>
-    (W, W->AddGUI(make_unique<FICSTerminal>(nullptr, W, W->default_font, chess_gui->term_dim)), 0);
+  ChessView *chess_view = W->AddView(make_unique<ChessView>(W));
+  chess_view->chess_terminal = make_unique<ChessTerminalTab>
+    (W, W->AddView(make_unique<FICSTerminal>(nullptr, W, W->default_font, chess_view->term_dim)), 0);
 
-  W->reshaped_cb = bind(&ChessGUI::Reshaped, chess_gui);
-  W->frame_cb = bind(&ChessGUI::Frame, chess_gui, _1, _2, _3);
-  W->default_textbox = [=]{ return app->run ? chess_gui->chess_terminal->terminal : nullptr; };
-  if (FLAGS_console) W->console->animating_cb = bind(&ChessGUI::ConsoleAnimatingCB, chess_gui);
+  W->reshaped_cb = bind(&ChessView::Reshaped, chess_view);
+  W->frame_cb = bind(&ChessView::Frame, chess_view, _1, _2, _3);
+  W->default_textbox = [=]{ return app->run ? chess_view->chess_terminal->terminal : nullptr; };
+  if (FLAGS_console) W->console->animating_cb = bind(&ChessView::ConsoleAnimatingCB, chess_view);
 
   W->shell = make_unique<Shell>(W);
-  W->shell->Add("games", bind(&ChessGUI::ListGames,    chess_gui));
-  W->shell->Add("load",  bind(&ChessGUI::LoadPosition, chess_gui, _1));
+  W->shell->Add("games", bind(&ChessView::ListGames,    chess_view));
+  W->shell->Add("load",  bind(&ChessView::LoadPosition, chess_view, _1));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
   binds->Add('6',        Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, W->shell.get(), vector<string>())));
-  binds->Add(Key::Up,    Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollUp();   app->scheduler.Wakeup(W); })));
-  binds->Add(Key::Down,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(W); })));
-  binds->Add(Key::Left,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->WalkHistory(1); app->scheduler.Wakeup(W); })));
-  binds->Add(Key::Right, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_gui->WalkHistory(0); app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Up,    Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->chess_terminal->terminal->ScrollUp();   app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Down,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Left,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->WalkHistory(1); app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Right, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->WalkHistory(0); app->scheduler.Wakeup(W); })));
 
   if (FLAGS_engine.size()) {
-    chess_gui->chess_engine = make_unique<UniversalChessInterfaceEngine>();
-    CHECK(chess_gui->chess_engine->Start(Asset::FileName(FLAGS_engine), W));
+    chess_view->chess_engine = make_unique<UniversalChessInterfaceEngine>();
+    CHECK(chess_view->chess_engine->Start(Asset::FileName(FLAGS_engine), W));
   }
 }
 
@@ -521,7 +521,7 @@ extern "C" int MyAppMain() {
   app->scheduler.AddMainWaitMouse(app->focused);
   app->StartNewWindow(app->focused);
 
-  ChessGUI *chess_gui = app->focused->GetOwnGUI<ChessGUI>(0);
+  ChessView *chess_view = app->focused->GetOwnView<ChessView>(0);
   auto seek_command = &FLAGS_seek_command;
 
   // app->asset.Add(name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
@@ -537,23 +537,23 @@ extern "C" int MyAppMain() {
   app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
   app->soundasset.Load();
 
-  my_app->askseek = SystemAlertView::Create(AlertItemVec{
+  my_app->askseek = SystemToolkit::CreateAlert(AlertItemVec{
     { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" }, { "Cancel", },
-    { "Continue", "", bind([=](const string &a){ chess_gui->Send("seek " + (*seek_command = a)); }, _1)}
+    { "Continue", "", bind([=](const string &a){ chess_view->Send("seek " + (*seek_command = a)); }, _1)}
   });
 
-  my_app->askresign = SystemAlertView::Create(AlertItemVec{
+  my_app->askresign = SystemToolkit::CreateAlert(AlertItemVec{
     { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" }, { "No" },
-    { "Yes", "", bind([=](){ chess_gui->Send("resign"); })}
+    { "Yes", "", bind([=](){ chess_view->Send("resign"); })}
   });
 
 #ifndef LFL_MOBILE
-  my_app->editmenu = SystemMenuView::CreateEditMenu(MenuItemVec{
-    MenuItem{ "u", "Undo pre-move",         bind(&ChessGUI::UndoPremove, chess_gui, app->focused)},
-    MenuItem{ "",  "Copy PGN to clipboard", bind(&ChessGUI::CopyPGNToClipboard, chess_gui)}
+  my_app->editmenu = SystemToolkit::CreateEditMenu(MenuItemVec{
+    MenuItem{ "u", "Undo pre-move",         bind(&ChessView::UndoPremove, chess_view, app->focused)},
+    MenuItem{ "",  "Copy PGN to clipboard", bind(&ChessView::CopyPGNToClipboard, chess_view)}
   });
-  my_app->viewmenu = SystemMenuView::Create("View", MenuItemVec{
-    MenuItem{ "f",       "Flip board", bind(&ChessGUI::FlipBoard, chess_gui, app->focused)},
+  my_app->viewmenu = SystemToolkit::CreateMenu("View", MenuItemVec{
+    MenuItem{ "f",       "Flip board", bind(&ChessView::FlipBoard, chess_view, app->focused)},
     MenuItem{ "<left>",  "Previous move" },
     MenuItem{ "<right>", "Next move" },
     MenuItem{ "<up>",    "Scroll up" },    
@@ -562,17 +562,17 @@ extern "C" int MyAppMain() {
   {
     MenuItemVec gamemenu{
       MenuItem{ "s", "Seek",       bind([=](){ my_app->askseek->Show(*seek_command); })},
-      MenuItem{ "d", "Offer Draw", bind([=](){ chess_gui->Send("draw"); })},
+      MenuItem{ "d", "Offer Draw", bind([=](){ chess_view->Send("draw"); })},
       MenuItem{ "r", "Resign",     bind([=](){ my_app->askresign->Show(""); })}
     };
     if (FLAGS_engine.size()) {
-      gamemenu.push_back(MenuItem{"", "Engine play white", bind(&ChessGUI::StartEngine, chess_gui, false) });
-      gamemenu.push_back(MenuItem{"", "Engine play black", bind(&ChessGUI::StartEngine, chess_gui, true) });
+      gamemenu.push_back(MenuItem{"", "Engine play white", bind(&ChessView::StartEngine, chess_view, false) });
+      gamemenu.push_back(MenuItem{"", "Engine play black", bind(&ChessView::StartEngine, chess_view, true) });
     }
-    my_app->gamemenu = SystemMenuView::Create("Game", move(gamemenu));
+    my_app->gamemenu = SystemToolkit::CreateMenu("Game", move(gamemenu));
   }
 #else
-  my_app->maintoolbar = SystemToolbarView::Create("", MenuItemVec{ 
+  my_app->maintoolbar = SystemToolkit::CreateToolbar("", MenuItemVec{ 
     MenuItem{ "\U000025C0", "", bind(&ChessGUI::WalkHistory, chess_gui, true) },
     MenuItem{ "\U000025B6", "", bind(&ChessGUI::WalkHistory, chess_gui, false) },
     MenuItem{ "seek",       "", bind([=](){ my_app->askseek->Show(*seek_command); }) },
@@ -584,6 +584,6 @@ extern "C" int MyAppMain() {
   my_app->maintoolbar->Show(true);
 #endif
 
-  chess_gui->Open(FLAGS_connect);
+  chess_view->Open(FLAGS_connect);
   return app->Main();
 }
