@@ -23,9 +23,9 @@
 #include "chess.h"
 #include "fics.h"
 #ifdef LFL_FLATBUFFERS
-#include "term/term_generated.h"
+#include "LTerminal/term_generated.h"
 #endif
-#include "term/term.h"
+#include "LTerminal/term.h"
 
 namespace LFL {
 DEFINE_string(connect, "freechess.org:5000", "Connect to server");
@@ -44,6 +44,7 @@ struct MyAppState {
 
 struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
   using TerminalTabT::TerminalTabT;
+  virtual bool GetFocused() const { return true; }
   virtual bool Animating() const { return false; }
   virtual void UpdateTargetFPS() {}
   virtual void SetFontSize(int) {}
@@ -537,22 +538,22 @@ extern "C" int MyAppMain() {
   app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
   app->soundasset.Load();
 
-  my_app->askseek = SystemToolkit::CreateAlert(AlertItemVec{
+  my_app->askseek = app->toolkit->CreateAlert(AlertItemVec{
     { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" }, { "Cancel", },
     { "Continue", "", bind([=](const string &a){ chess_view->Send("seek " + (*seek_command = a)); }, _1)}
   });
 
-  my_app->askresign = SystemToolkit::CreateAlert(AlertItemVec{
+  my_app->askresign = app->toolkit->CreateAlert(AlertItemVec{
     { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" }, { "No" },
     { "Yes", "", bind([=](){ chess_view->Send("resign"); })}
   });
 
 #ifndef LFL_MOBILE
-  my_app->editmenu = SystemToolkit::CreateEditMenu(MenuItemVec{
+  my_app->editmenu = app->toolkit->CreateEditMenu(MenuItemVec{
     MenuItem{ "u", "Undo pre-move",         bind(&ChessView::UndoPremove, chess_view, app->focused)},
     MenuItem{ "",  "Copy PGN to clipboard", bind(&ChessView::CopyPGNToClipboard, chess_view)}
   });
-  my_app->viewmenu = SystemToolkit::CreateMenu("View", MenuItemVec{
+  my_app->viewmenu = app->toolkit->CreateMenu("View", MenuItemVec{
     MenuItem{ "f",       "Flip board", bind(&ChessView::FlipBoard, chess_view, app->focused)},
     MenuItem{ "<left>",  "Previous move" },
     MenuItem{ "<right>", "Next move" },
@@ -569,7 +570,7 @@ extern "C" int MyAppMain() {
       gamemenu.push_back(MenuItem{"", "Engine play white", bind(&ChessView::StartEngine, chess_view, false) });
       gamemenu.push_back(MenuItem{"", "Engine play black", bind(&ChessView::StartEngine, chess_view, true) });
     }
-    my_app->gamemenu = SystemToolkit::CreateMenu("Game", move(gamemenu));
+    my_app->gamemenu = app->toolkit->CreateMenu("Game", move(gamemenu));
   }
 #else
   my_app->maintoolbar = SystemToolkit::CreateToolbar("", MenuItemVec{ 
