@@ -2,6 +2,8 @@
 
 lfl_set_os_toolkit(CHESS)
 lfl_project(LChess)
+add_subdirectory(imports)
+
 lfl_add_package(LChess SOURCES chess.cpp chess.rc
                 LINK_LIBRARIES ${LFL_APP_LIB} ${CHESS_FRAMEWORK} ${CHESS_GRAPHICS}
                 ${LFL_APP_AUDIO} app_null_camera app_null_matrix app_null_fft
@@ -10,12 +12,10 @@ lfl_add_package(LChess SOURCES chess.cpp chess.rc
                 app_null_ssl app_null_js app_null_tu app_null_billing app_null_advertising
                 app_null_crashreporting ${CHESS_TOOLKIT} ${LFL_APP_OS}
                 ASSET_FILES ${LFL_APP_ASSET_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/assets/*
-                ${LFL_SOURCE_DIR}/core/app/assets/Nobile.ttf,32,*
+                ${LFL_SOURCE_DIR}/core/app/assets/Nobile.ttf,32,* ${STOCKFISH_BIN}
                 LIB_FILES ${LFL_APP_LIB_FILES} ${PORTAUDIO_LIB_FILES})
-set(CHESS_DEP)
 if(LFL_STOCKFISH)
   add_dependencies(LChess Stockfish)
-  set(LFL_APP_ASSET_FILES ${LFL_APP_ASSET_FILES} ${STOCKFISH_BIN})
 endif()
 lfl_post_build_start(LChess)
 

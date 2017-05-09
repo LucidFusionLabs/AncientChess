@@ -1,0 +1,3 @@
+[submodule "imports/Stockfish"]
+	path = imports/Stockfish
+	url = https://github.com/official-stockfish/Stockfish
