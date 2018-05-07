@@ -347,13 +347,13 @@ struct BitBoardPosition {
   }
 
   BitBoard BishopMoves(int p, bool black) const {
-    static MagicMoves *magic_moves = Singleton<MagicMoves>::Get();
+    static MagicMoves *magic_moves = Singleton<MagicMoves>::Set();
     BitBoard blockers = AllPieces() & bishop_occupancy_mask[p];
     return magic_moves->BishopMoves(p, blockers, Pieces(black)[ALL]);
   }
 
   BitBoard RookMoves(int p, bool black) const {
-    static MagicMoves *magic_moves = Singleton<MagicMoves>::Get();
+    static MagicMoves *magic_moves = Singleton<MagicMoves>::Set();
     BitBoard blockers = AllPieces() & rook_occupancy_mask[p];
     int magic_index = MagicMoves::MagicHash(p, blockers, rook_magic_number, rook_magic_number_bits);
     return magic_moves->rook_magic_moves[p][magic_index] & ~Pieces(black)[ALL];
@@ -505,7 +505,7 @@ struct Position : public BitBoardPosition {
     flags.b_cant_castle      = !(args.size() > 1 && strchr(args[1].data(), 'k'));
     flags.fifty_move_rule_count = args.size() > 3 ? atoi(args[3]) : 0;
     move_number = args.size() > 4 ? (atoi(args[4])*2 - !flags.to_move_color - 1) : 0;
-    hash = Singleton<ZobristHasher>::Get()->GetHash(*this, flags, 0);
+    hash = Singleton<ZobristHasher>::Set()->GetHash(*this, flags, 0);
     return true;
   }
 
@@ -938,7 +938,7 @@ struct UniversalChessInterfaceEngine {
   }
 };
 
-#ifdef LFL_CORE_APP_GUI_H__
+#ifdef LFL_CORE_APP_GL_VIEW_H__
 struct ChessTerminal : public Terminal {
   Terminal::Controller *controller=0;
   function<Chess::Game*(int)> get_game_cb;
@@ -950,7 +950,7 @@ struct ChessTerminal : public Terminal {
   function<void(int, const string&, const string&, const string&)> game_over_cb;
   function<void(Chess::Game*, bool, int, int)> game_update_cb;
 
-  ChessTerminal(ByteSink *O, Window *W, const FontRef &F, const point &dim) : Terminal(O, W, F, dim), local_cmd(F) {}
+  ChessTerminal(ByteSink *O, Window *W, const FontRef &F, const point &dim) : Terminal(O, W, F, dim), local_cmd(W, F) {}
 
   virtual void Input(char k) { local_cmd.Input(k); Terminal::Write(StringPiece(&k, 1)); }
   virtual void Erase      () { local_cmd.Erase();  Terminal::Write(StringPiece("\x08\x1b[1P")); }
@@ -975,7 +975,7 @@ struct ChessTerminal : public Terminal {
   virtual void Send(const string &) = 0;
   virtual void MakeMove(const string&) = 0;
 };
-#endif // LFL_CORE_APP_GUI_H__
+#endif // LFL_CORE_APP_GL_VIEW_H__
 
 }; // namespace LFL
 #endif // LFL_CHESS_CHESS_H__

@@ -17,15 +17,24 @@
  */
 
 #include "core/app/app.h"
-#include "core/app/gui.h"
+#include "core/app/shell.h"
+#include "core/app/gl/view.h"
+#include "core/app/gl/terminal.h"
 #include "core/app/ipc.h"
 #include "core/app/net/resolver.h"
-#include "chess.h"
-#include "fics.h"
+
+namespace LFL {
+Application *app;  
+inline string   LS  (const char *n) { return app->GetLocalizedString(n); }
+inline String16 LS16(const char *n) { return app->GetLocalizedString16(n); }
+};
+
 #ifdef LFL_FLATBUFFERS
 #include "LTerminal/term_generated.h"
 #endif
 #include "LTerminal/term.h"
+#include "chess.h"
+#include "fics.h"
 
 namespace LFL {
 DEFINE_string(connect, "freechess.org:5000", "Connect to server");
@@ -63,7 +72,7 @@ struct ChessView : public View {
   bool title_changed = 0, console_animating = 0;
   Time move_animation_time = Time(200);
   DragTracker drag_tracker;
-  ChessView(Window *W) : View(W), divider(this, true, W->width) { (top_game = &game_map[0])->active = 0; }
+  ChessView(Window *W) : View(W), divider(this, true, W->gl_w) { (top_game = &game_map[0])->active = 0; }
 
   /**/  Chess::Game *Top()       { return top_game; }
   const Chess::Game *Top() const { return top_game; }
@@ -111,7 +120,7 @@ struct ChessView : public View {
     t->game_start_cb   = bind(&ChessView::GameStartCB,   this, _1);
     t->game_over_cb    = bind(&ChessView::GameOverCB,    this, _1, _2, _3, _4);
     t->game_update_cb  = bind(&ChessView::GameUpdateCB,  this, _1, _2, _3, _4);
-    t->SetColors(Singleton<Terminal::StandardVGAColors>::Get());
+    t->SetColors(Singleton<Terminal::StandardVGAColors>::Set());
   }
 
   void Send(const string &b) {
@@ -131,7 +140,7 @@ struct ChessView : public View {
   }
 
   void ListGames() { for (auto &i : game_map) INFO(i.first, " ", i.second.p1_name, " vs ", i.second.p2_name); }
-  void FlipBoard(Window *w) { if (auto g = Top()) g->flip_board = !g->flip_board; app->scheduler.Wakeup(w); }
+  void FlipBoard(Window *w) { if (auto g = Top()) g->flip_board = !g->flip_board; w->Wakeup(); }
   void UpdateAnimating(Window *w) { app->scheduler.SetAnimating(w, (Top() && Top()->move_animate_from != -1) | console_animating); }
 
   void ConsoleAnimatingCB() {
@@ -147,7 +156,7 @@ struct ChessView : public View {
     game->game_number = game_no;
     if (FLAGS_enable_audio) {
       static SoundAsset *start_sound = app->soundasset("start");
-      app->PlaySoundEffect(start_sound);
+      root->parent->audio->PlaySoundEffect(start_sound);
     }
     if (FLAGS_auto_close_old_games) FilterValues<unordered_map<int, Chess::Game>>
       (&game_map, [](const pair<const int, Chess::Game> &x){ return !x.second.active; });
@@ -158,7 +167,7 @@ struct ChessView : public View {
     bool lose = (my_name == p1 && result == "0-1") || (my_name == p2 && result == "1-0");
     if (FLAGS_enable_audio) {
       static SoundAsset *win_sound = app->soundasset("win"), *lose_sound = app->soundasset("lose");
-      app->PlaySoundEffect(lose ? lose_sound : win_sound);
+      root->parent->audio->PlaySoundEffect(lose ? lose_sound : win_sound);
     }
     game_map[game_no].active = false;
   }
@@ -168,7 +177,7 @@ struct ChessView : public View {
     title_changed = true;
     if (FLAGS_enable_audio) {
       static SoundAsset *move_sound = app->soundasset("move"), *capture_sound = app->soundasset("capture");
-      app->PlaySoundEffect(Chess::GetMoveCapture(game->position.move) ? capture_sound : move_sound);
+      root->parent->audio->PlaySoundEffect(Chess::GetMoveCapture(game->position.move) ? capture_sound : move_sound);
     }
     if (game->new_game && !(game->new_game = 0)) {
       game->flip_board = game->my_color == Chess::BLACK;
@@ -186,7 +195,7 @@ struct ChessView : public View {
   void IllegalMoveCB() {
     if (FLAGS_enable_audio) {
       static SoundAsset *illegal_sound = app->soundasset("illegal");
-      app->PlaySoundEffect(illegal_sound);
+      root->parent->audio->PlaySoundEffect(illegal_sound);
     }
   }
 
@@ -252,7 +261,7 @@ struct ChessView : public View {
     }
   }
 
-  void Reshaped() { divider.size = root->width; }
+  void Reshaped() { divider.size = root->gl_w; }
   void Layout() {
     Font *font = chess_terminal->terminal->style.font;
     ResetView();
@@ -298,9 +307,9 @@ struct ChessView : public View {
     }
 
     if (divider.changed) Layout();
-    if (win.w != W->width) { ScopedFillColor sfc(W->gd, Color::grey70); gc.DrawBox1(Box(W->x, win.y, W->width, win.h)); }
+    if (win.w != W->gl_w) { ScopedFillColor sfc(W->gd, Color::grey70); gc.DrawBox1(Box(W->gl_x, win.y, W->gl_w, win.h)); }
     Draw();
-    DrawGame(W, game ? game : Singleton<Chess::Game>::Get(), now);
+    DrawGame(W, game ? game : Singleton<Chess::Game>::Set(), now);
 
     W->gd->DisableBlend();
     {
@@ -316,7 +325,7 @@ struct ChessView : public View {
 
   void DrawGame(Window *W, Chess::Game *game, Time now) {
     int black_font_index[7] = { 0, 3, 2, 0, 5, 4, 1 }, bits[65];
-    static Font *pieces = app->fonts->Get("ChessPieces1");
+    static Font *pieces = app->fonts->Get(W->gl_h, "ChessPieces1");
     Drawable::Attr draw_attr(pieces);
     GraphicsContext gc(W->gd);
     for (int i=Chess::PAWN; i <= Chess::KING; i++) {
@@ -400,7 +409,7 @@ struct ChessView : public View {
     if (!game->premove.size() && !game->history.size()) return;
     game->position = game->premove.size() ? game->premove.back() : game->history.back();
     GameUpdateCB(game);
-    app->scheduler.Wakeup(W);
+    W->Wakeup();
   }
 
   void CopyPGNToClipboard() {
@@ -436,50 +445,51 @@ struct ChessView : public View {
 
 void MyWindowInit(Window *W) {
   W->caption = "Chess";
-  W->width = my_app->initial_board_dim.x;
-  W->height = my_app->initial_board_dim.y + my_app->initial_term_dim.y * Fonts::InitFontHeight();
+  W->gl_w = my_app->initial_board_dim.x;
+  W->gl_h = my_app->initial_board_dim.y + my_app->initial_term_dim.y * Fonts::InitFontHeight();
 }
 
 void MyWindowStart(Window *W) {
   if (FLAGS_console) W->InitConsole(Callback());
   ChessView *chess_view = W->AddView(make_unique<ChessView>(W));
   chess_view->chess_terminal = make_unique<ChessTerminalTab>
-    (W, W->AddView(make_unique<FICSTerminal>(nullptr, W, W->default_font, chess_view->term_dim)), 0);
+    (W, W->AddView(make_unique<FICSTerminal>(nullptr, W, W->default_font, chess_view->term_dim)), 0, 0);
 
   W->reshaped_cb = bind(&ChessView::Reshaped, chess_view);
   W->frame_cb = bind(&ChessView::Frame, chess_view, _1, _2, _3);
   W->default_textbox = [=]{ return app->run ? chess_view->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->console->animating_cb = bind(&ChessView::ConsoleAnimatingCB, chess_view);
 
-  W->shell = make_unique<Shell>(W);
+  W->shell = make_unique<Shell>(W, app, app, app, app, app, app->net.get(), app, app, app->audio.get(),
+                                app, app, app->fonts.get());
   W->shell->Add("games", bind(&ChessView::ListGames,    chess_view));
   W->shell->Add("load",  bind(&ChessView::LoadPosition, chess_view, _1));
 
   BindMap *binds = W->AddInputController(make_unique<BindMap>());
   binds->Add(Key::Escape,                    Bind::CB(bind(&Shell::quit,    W->shell.get(), vector<string>())));
   binds->Add('6',        Key::Modifier::Cmd, Bind::CB(bind(&Shell::console, W->shell.get(), vector<string>())));
-  binds->Add(Key::Up,    Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->chess_terminal->terminal->ScrollUp();   app->scheduler.Wakeup(W); })));
-  binds->Add(Key::Down,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->chess_terminal->terminal->ScrollDown(); app->scheduler.Wakeup(W); })));
-  binds->Add(Key::Left,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->WalkHistory(1); app->scheduler.Wakeup(W); })));
-  binds->Add(Key::Right, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->WalkHistory(0); app->scheduler.Wakeup(W); })));
+  binds->Add(Key::Up,    Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->chess_terminal->terminal->ScrollUp();   W->Wakeup(); })));
+  binds->Add(Key::Down,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->chess_terminal->terminal->ScrollDown(); W->Wakeup(); })));
+  binds->Add(Key::Left,  Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->WalkHistory(1); W->Wakeup(); })));
+  binds->Add(Key::Right, Key::Modifier::Cmd, Bind::CB(bind([=](){ chess_view->WalkHistory(0); W->Wakeup(); })));
 
   if (FLAGS_engine.size()) {
     chess_view->chess_engine = make_unique<UniversalChessInterfaceEngine>();
-    CHECK(chess_view->chess_engine->Start(Asset::FileName(FLAGS_engine), W));
+    CHECK(chess_view->chess_engine->Start(W->parent->FileName(FLAGS_engine), W));
   }
 }
 
 }; // namespace LFL
 using namespace LFL;
 
-extern "C" void MyAppCreate(int argc, const char* const* argv) {
+extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
   FLAGS_enable_video = FLAGS_enable_audio = FLAGS_enable_input = FLAGS_enable_network = FLAGS_console = 1;
   FLAGS_console_font = "Nobile.ttf";
   FLAGS_console_font_flag = 0;
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
-  app = new Application(argc, argv);
-  app->focused = Window::Create();
+  app = CreateApplication(argc, argv).release();
+  app->focused = CreateWindow(app).release();
   my_app = new MyAppState();
   app->name = "LChess";
   app->window_start_cb = MyWindowStart;
@@ -493,6 +503,7 @@ extern "C" void MyAppCreate(int argc, const char* const* argv) {
   app->SetAutoRotateOrientation(true);
   app->CloseTouchKeyboardAfterReturn(false);
 #endif
+  return app;
 }
 
 extern "C" int MyAppMain() {
@@ -517,7 +528,7 @@ extern "C" int MyAppMain() {
   }
 #endif
   if (app->Init()) return -1;
-  app->fonts->atlas_engine.get()->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
+  app->fonts->atlas_engine.get(app->fonts.get())->Init(FontDesc("ChessPieces1", "", 0, Color::white, Color::clear, 0, false));
   app->scheduler.AddMainWaitKeyboard(app->focused);
   app->scheduler.AddMainWaitMouse(app->focused);
   app->StartNewWindow(app->focused);
@@ -525,35 +536,35 @@ extern "C" int MyAppMain() {
   ChessView *chess_view = app->focused->GetOwnView<ChessView>(0);
   auto seek_command = &FLAGS_seek_command;
 
-  // app->asset.Add(name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
-  app->asset.Add("board1", "board1.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
+  // app->asset.Add(app, name,  texture,      scale, translate, rotate, geometry, hull,    0, 0);
+  app->asset.Add(app, "board1", "board1.png", 0,     0,         0,      nullptr,  nullptr, 0, 0);
   app->asset.Load();
 
-  // app->soundasset.Add(name,   filename,      ringbuf, channels, sample_rate, seconds );
-  app->soundasset.Add("start",   "start.wav",   nullptr, 0,        0,           0       );
-  app->soundasset.Add("move",    "move.wav",    nullptr, 0,        0,           0       );
-  app->soundasset.Add("capture", "capture.wav", nullptr, 0,        0,           0       );
-  app->soundasset.Add("win",     "win.wav",     nullptr, 0,        0,           0       );
-  app->soundasset.Add("lose",    "lose.wav",    nullptr, 0,        0,           0       );
-  app->soundasset.Add("illegal", "illegal.wav", nullptr, 0,        0,           0       );
+  // app->soundasset.Add(app, name,   filename,      ringbuf, channels, sample_rate, seconds );
+  app->soundasset.Add(app, "start",   "start.wav",   nullptr, 0,        0,           0       );
+  app->soundasset.Add(app, "move",    "move.wav",    nullptr, 0,        0,           0       );
+  app->soundasset.Add(app, "capture", "capture.wav", nullptr, 0,        0,           0       );
+  app->soundasset.Add(app, "win",     "win.wav",     nullptr, 0,        0,           0       );
+  app->soundasset.Add(app, "lose",    "lose.wav",    nullptr, 0,        0,           0       );
+  app->soundasset.Add(app, "illegal", "illegal.wav", nullptr, 0,        0,           0       );
   app->soundasset.Load();
 
-  my_app->askseek = app->toolkit->CreateAlert(AlertItemVec{
+  my_app->askseek = app->toolkit->CreateAlert(app->focused, AlertItemVec{
     { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" }, { "Cancel", },
     { "Continue", "", bind([=](const string &a){ chess_view->Send("seek " + (*seek_command = a)); }, _1)}
   });
 
-  my_app->askresign = app->toolkit->CreateAlert(AlertItemVec{
+  my_app->askresign = app->toolkit->CreateAlert(app->focused, AlertItemVec{
     { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" }, { "No" },
     { "Yes", "", bind([=](){ chess_view->Send("resign"); })}
   });
 
 #ifndef LFL_MOBILE
-  my_app->editmenu = app->toolkit->CreateEditMenu(MenuItemVec{
+  my_app->editmenu = app->toolkit->CreateEditMenu(app->focused, MenuItemVec{
     MenuItem{ "u", "Undo pre-move",         bind(&ChessView::UndoPremove, chess_view, app->focused)},
     MenuItem{ "",  "Copy PGN to clipboard", bind(&ChessView::CopyPGNToClipboard, chess_view)}
   });
-  my_app->viewmenu = app->toolkit->CreateMenu("View", MenuItemVec{
+  my_app->viewmenu = app->toolkit->CreateMenu(app->focused, "View", MenuItemVec{
     MenuItem{ "f",       "Flip board", bind(&ChessView::FlipBoard, chess_view, app->focused)},
     MenuItem{ "<left>",  "Previous move" },
     MenuItem{ "<right>", "Next move" },
@@ -570,7 +581,7 @@ extern "C" int MyAppMain() {
       gamemenu.push_back(MenuItem{"", "Engine play white", bind(&ChessView::StartEngine, chess_view, false) });
       gamemenu.push_back(MenuItem{"", "Engine play black", bind(&ChessView::StartEngine, chess_view, true) });
     }
-    my_app->gamemenu = app->toolkit->CreateMenu("Game", move(gamemenu));
+    my_app->gamemenu = app->toolkit->CreateMenu(app->focused, "Game", move(gamemenu));
   }
 #else
   my_app->maintoolbar = SystemToolkit::CreateToolbar("", MenuItemVec{ 

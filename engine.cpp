@@ -1,13 +1,19 @@
 #include "core/app/app.h"
 #include "core/app/ipc.h"
+
+namespace LFL {
+Application *app;
+};
+
 #include "chess.h"
 
 using namespace LFL;
 
-extern "C" void MyAppCreate(int argc, const char* const* argv) {
-  app = new Application(argc, argv);
-  app->focused = Window::Create();
+extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
+  app = CreateApplication(argc, argv).release();
+  app->focused = CreateWindow(app).release();
   app->logout = app->logerr = nullptr;
+  return app;
 }
 
 extern "C" int MyAppMain() {

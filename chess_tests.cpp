@@ -1,14 +1,20 @@
 #include "gtest/gtest.h"
 #include "core/app/app.h"
 #include "core/app/ipc.h"
+
+namespace LFL {
+Application *app;
+};
+
 #include "chess.h"
 
 using namespace LFL;
 using namespace LFL::Chess;
 
-extern "C" void MyAppCreate(int argc, const char* const* argv) {
-  app = new Application(argc, argv);
-  app->focused = Window::Create();
+extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
+  app = CreateApplication(argc, argv).release();
+  app->focused = CreateWindow(app).release();
+  return app;
 }
 
 extern "C" int MyAppMain() {
@@ -563,7 +569,7 @@ TEST(Perft, Position6) {
 }
 
 TEST(Perft, PerftSuite) {
-  unique_ptr<File> testfile(Asset::OpenFile("perftsuite.epd"));
+  unique_ptr<File> testfile(app->OpenFile("perftsuite.epd"));
   if (!testfile || !testfile->Opened()) { EXPECT_TRUE(false); return; }
   FileLineIter tests(testfile.get());
   vector<SearchStats::Total> depth_total;
