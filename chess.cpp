@@ -24,7 +24,23 @@
 #include "core/app/net/resolver.h"
 
 namespace LFL {
-Application *app;  
+DEFINE_string(connect, "freechess.org:5000", "Connect to server");
+DEFINE_bool(click_or_drag_pieces, MOBILE, "Move by clicking or dragging");
+DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game starts");
+DEFINE_string(seek_command, "5 0", "Seek command");
+DEFINE_string(engine, "", "Chess engine");
+
+struct MyApp : public Application {
+  using Application::Application;
+  point initial_board_dim = point(630, 630);
+  point initial_term_dim = point(initial_board_dim.x / Fonts::InitFontWidth(), 10);
+  unique_ptr<AlertViewInterface> askseek, askresign;
+  unique_ptr<MenuViewInterface> editmenu, viewmenu, gamemenu;
+  unique_ptr<ToolbarViewInterface> maintoolbar;
+  void OnWindowInit(Window *W);
+  void OnWindowStart(Window *W);
+} *app;
+
 inline string   LS  (const char *n) { return app->GetLocalizedString(n); }
 inline String16 LS16(const char *n) { return app->GetLocalizedString16(n); }
 };
@@ -37,20 +53,6 @@ inline String16 LS16(const char *n) { return app->GetLocalizedString16(n); }
 #include "fics.h"
 
 namespace LFL {
-DEFINE_string(connect, "freechess.org:5000", "Connect to server");
-DEFINE_bool(click_or_drag_pieces, MOBILE, "Move by clicking or dragging");
-DEFINE_bool(auto_close_old_games, true, "Close old games whenever new game starts");
-DEFINE_string(seek_command, "5 0", "Seek command");
-DEFINE_string(engine, "", "Chess engine");
-
-struct MyAppState {
-  point initial_board_dim = point(630, 630);
-  point initial_term_dim = point(initial_board_dim.x / Fonts::InitFontWidth(), 10);
-  unique_ptr<AlertViewInterface> askseek, askresign;
-  unique_ptr<MenuViewInterface> editmenu, viewmenu, gamemenu;
-  unique_ptr<ToolbarViewInterface> maintoolbar;
-} *my_app;
-
 struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
   using TerminalTabT::TerminalTabT;
   virtual bool GetFocused() const { return true; }
@@ -63,7 +65,7 @@ struct ChessTerminalTab : public TerminalTabT<ChessTerminal> {
 struct ChessView : public View {
   unique_ptr<UniversalChessInterfaceEngine> chess_engine;
   unique_ptr<ChessTerminalTab> chess_terminal;
-  point term_dim=my_app->initial_term_dim;
+  point term_dim=app->initial_term_dim;
   v2 square_dim;
   Box win, board, term;
   Widget::Divider divider;
@@ -443,13 +445,13 @@ struct ChessView : public View {
   }
 };
 
-void MyWindowInit(Window *W) {
+void MyApp::OnWindowInit(Window *W) {
   W->caption = "Chess";
-  W->gl_w = my_app->initial_board_dim.x;
-  W->gl_h = my_app->initial_board_dim.y + my_app->initial_term_dim.y * Fonts::InitFontHeight();
+  W->gl_w = app->initial_board_dim.x;
+  W->gl_h = app->initial_board_dim.y + app->initial_term_dim.y * Fonts::InitFontHeight();
 }
 
-void MyWindowStart(Window *W) {
+void MyApp::OnWindowStart(Window *W) {
   if (FLAGS_console) W->InitConsole(Callback());
   ChessView *chess_view = W->AddView(make_unique<ChessView>(W));
   chess_view->chess_terminal = make_unique<ChessTerminalTab>
@@ -488,14 +490,12 @@ extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
   FLAGS_console_font_flag = 0;
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
-  app = CreateApplication(argc, argv).release();
+  app = make_unique<MyApp>(argc, argv).release();
   app->focused = CreateWindow(app).release();
-  my_app = new MyAppState();
   app->name = "LChess";
-  app->window_start_cb = MyWindowStart;
-  app->window_init_cb = MyWindowInit;
+  app->window_start_cb = bind(&MyApp::OnWindowStart, app, _1);
+  app->window_init_cb = bind(&MyApp::OnWindowInit, app, _1);
   app->window_init_cb(app->focused);
-  app->exit_cb = [](){ delete my_app; };
 #ifdef LFL_MOBILE
   app->SetExtraScale(true);
   app->SetTitleBar(true);
@@ -549,22 +549,22 @@ extern "C" int MyAppMain() {
   app->soundasset.Add(app, "illegal", "illegal.wav", nullptr, 0,        0,           0       );
   app->soundasset.Load();
 
-  my_app->askseek = app->toolkit->CreateAlert(app->focused, AlertItemVec{
+  app->askseek = app->toolkit->CreateAlert(app->focused, AlertItemVec{
     { "style", "textinput" }, { "Seek Game", "Edit seek game criteria" }, { "Cancel", },
     { "Continue", "", bind([=](const string &a){ chess_view->Send("seek " + (*seek_command = a)); }, _1)}
   });
 
-  my_app->askresign = app->toolkit->CreateAlert(app->focused, AlertItemVec{
+  app->askresign = app->toolkit->CreateAlert(app->focused, AlertItemVec{
     { "style", "confirm" }, { "Confirm resign", "Do you wish to resign?" }, { "No" },
     { "Yes", "", bind([=](){ chess_view->Send("resign"); })}
   });
 
 #ifndef LFL_MOBILE
-  my_app->editmenu = app->toolkit->CreateEditMenu(app->focused, MenuItemVec{
+  app->editmenu = app->toolkit->CreateEditMenu(app->focused, MenuItemVec{
     MenuItem{ "u", "Undo pre-move",         bind(&ChessView::UndoPremove, chess_view, app->focused)},
     MenuItem{ "",  "Copy PGN to clipboard", bind(&ChessView::CopyPGNToClipboard, chess_view)}
   });
-  my_app->viewmenu = app->toolkit->CreateMenu(app->focused, "View", MenuItemVec{
+  app->viewmenu = app->toolkit->CreateMenu(app->focused, "View", MenuItemVec{
     MenuItem{ "f",       "Flip board", bind(&ChessView::FlipBoard, chess_view, app->focused)},
     MenuItem{ "<left>",  "Previous move" },
     MenuItem{ "<right>", "Next move" },
@@ -573,27 +573,27 @@ extern "C" int MyAppMain() {
   });
   {
     MenuItemVec gamemenu{
-      MenuItem{ "s", "Seek",       bind([=](){ my_app->askseek->Show(*seek_command); })},
+      MenuItem{ "s", "Seek",       bind([=](){ app->askseek->Show(*seek_command); })},
       MenuItem{ "d", "Offer Draw", bind([=](){ chess_view->Send("draw"); })},
-      MenuItem{ "r", "Resign",     bind([=](){ my_app->askresign->Show(""); })}
+      MenuItem{ "r", "Resign",     bind([=](){ app->askresign->Show(""); })}
     };
     if (FLAGS_engine.size()) {
       gamemenu.push_back(MenuItem{"", "Engine play white", bind(&ChessView::StartEngine, chess_view, false) });
       gamemenu.push_back(MenuItem{"", "Engine play black", bind(&ChessView::StartEngine, chess_view, true) });
     }
-    my_app->gamemenu = app->toolkit->CreateMenu(app->focused, "Game", move(gamemenu));
+    app->gamemenu = app->toolkit->CreateMenu(app->focused, "Game", move(gamemenu));
   }
 #else
-  my_app->maintoolbar = SystemToolkit::CreateToolbar("", MenuItemVec{ 
+  app->maintoolbar = SystemToolkit::CreateToolbar("", MenuItemVec{ 
     MenuItem{ "\U000025C0", "", bind(&ChessGUI::WalkHistory, chess_gui, true) },
     MenuItem{ "\U000025B6", "", bind(&ChessGUI::WalkHistory, chess_gui, false) },
-    MenuItem{ "seek",       "", bind([=](){ my_app->askseek->Show(*seek_command); }) },
-    MenuItem{ "resign",     "", bind([=](){ my_app->askresign->Show(""); }) },
+    MenuItem{ "seek",       "", bind([=](){ app->askseek->Show(*seek_command); }) },
+    MenuItem{ "resign",     "", bind([=](){ app->askresign->Show(""); }) },
     MenuItem{ "draw",       "", bind([=](){ chess_gui->Send("draw"); }) },
     MenuItem{ "flip",       "", bind(&ChessGUI::FlipBoard,   chess_gui, app->focused) },
     MenuItem{ "undo",       "", bind(&ChessGUI::UndoPremove, chess_gui, app->focused) }
   });
-  my_app->maintoolbar->Show(true);
+  app->maintoolbar->Show(true);
 #endif
 
   chess_view->Open(FLAGS_connect);

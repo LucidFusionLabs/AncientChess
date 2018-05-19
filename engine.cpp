@@ -10,7 +10,7 @@ Application *app;
 using namespace LFL;
 
 extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
-  app = CreateApplication(argc, argv).release();
+  app = make_unique<Application>(argc, argv).release();
   app->focused = CreateWindow(app).release();
   app->logout = app->logerr = nullptr;
   return app;

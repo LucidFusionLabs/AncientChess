@@ -12,7 +12,7 @@ using namespace LFL;
 using namespace LFL::Chess;
 
 extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
-  app = CreateApplication(argc, argv).release();
+  app = make_unique<Application>(argc, argv).release();
   app->focused = CreateWindow(app).release();
   return app;
 }
