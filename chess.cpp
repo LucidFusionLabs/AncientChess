@@ -101,7 +101,7 @@ struct ChessView : public View {
 
   void UseReconnectTerminalController(string hostport) {
     auto c = make_unique<BufferedShellTerminalController>
-      (chess_terminal.get(), "\r\nConnection closed.\r\n", StringCB(), StringVecCB(),
+      (chess_terminal.get(), &root->parent->localfs, "\r\nConnection closed.\r\n", StringCB(), StringVecCB(),
        bind(&ChessView::UseChessTerminalController, this, hostport), false);
     c->enter_char = '\n';
     chess_terminal->ChangeController(move(c));
@@ -462,8 +462,7 @@ void MyApp::OnWindowStart(Window *W) {
   W->default_textbox = [=]{ return app->run ? chess_view->chess_terminal->terminal : nullptr; };
   if (FLAGS_console) W->console->animating_cb = bind(&ChessView::ConsoleAnimatingCB, chess_view);
 
-  W->shell = make_unique<Shell>(W, app, app, app, app, app, app->net.get(), app, app, app->audio.get(),
-                                app, app, app->fonts.get());
+  W->shell = make_unique<Shell>(W);
   W->shell->Add("games", bind(&ChessView::ListGames,    chess_view));
   W->shell->Add("load",  bind(&ChessView::LoadPosition, chess_view, _1));
 
@@ -491,7 +490,7 @@ extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
   FLAGS_peak_fps = 20;
   FLAGS_target_fps = 0;
   app = make_unique<MyApp>(argc, argv).release();
-  app->focused = CreateWindow(app).release();
+  app->focused = app->framework->ConstructWindow(app).release();
   app->name = "LChess";
   app->window_start_cb = bind(&MyApp::OnWindowStart, app, _1);
   app->window_init_cb = bind(&MyApp::OnWindowInit, app, _1);
@@ -506,7 +505,7 @@ extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
   return app;
 }
 
-extern "C" int MyAppMain() {
+extern "C" int MyAppMain(LFApp*) {
   if (app->Create(__FILE__)) return -1;
 #ifdef WIN32
   app->asset_cache["default.vert"]                                    = app->LoadResource(200);

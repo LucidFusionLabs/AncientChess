@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
     <key>application-identifier</key>
-    <string>9S723G94YQ.com.lucidfusionlabs.AncientChess</string>
+    <string>9S723G94YQ.com.lucidfusionlabs.OldChess</string>
     <key>keychain-access-groups</key>
     <array>
-        <string>9S723G94YQ.com.lucidfusionlabs.AncientChess</string>
+        <string>9S723G94YQ.com.lucidfusionlabs.OldChess</string>
     </array>
 </dict>
 </plist>

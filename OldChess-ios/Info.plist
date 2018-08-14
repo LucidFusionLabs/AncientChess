@@ -4,23 +4,33 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
+	<key>CFBundleDisplayName</key>
+	<string>OldChess</string>
 	<key>CFBundleExecutable</key>
-	<string>AncientChess</string>
+	<string>OldChess</string>
 	<key>CFBundleIconFile</key>
-	<string>icon</string>
+	<string>Icon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.lucidfusionlabs.osx.AncientChess</string>
+	<string>com.lucidfusionlabs.OldChess</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>AncientChess</string>
+	<string>OldChess</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <key>NSPrincipalClass</key>
-  <string>NSApplication</string>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+  <key>UIFileSharingEnabled</key>
+  <true/>
+  <key>UILaunchStoryboardName</key>
+  <string>LaunchScreen</string>
+  <key>UIStatusBarHidden</key>
+  <true/>
+  <key>UIViewControllerBasedStatusBarAppearance</key>
+  <false/>
 </dict>
 </plist>

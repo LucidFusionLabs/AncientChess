@@ -11,12 +11,12 @@ using namespace LFL;
 
 extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
   app = make_unique<Application>(argc, argv).release();
-  app->focused = CreateWindow(app).release();
+  app->focused = app->framework->ConstructWindow(app).release();
   app->logout = app->logerr = nullptr;
   return app;
 }
 
-extern "C" int MyAppMain() {
+extern "C" int MyAppMain(LFApp*) {
   int len;
   char buf[4096];
   NextRecordDispatcher line_buf;

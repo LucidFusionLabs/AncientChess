@@ -13,11 +13,11 @@ using namespace LFL::Chess;
 
 extern "C" LFApp *MyAppCreate(int argc, const char* const* argv) {
   app = make_unique<Application>(argc, argv).release();
-  app->focused = CreateWindow(app).release();
+  app->focused = app->framework->ConstructWindow(app).release();
   return app;
 }
 
-extern "C" int MyAppMain() {
+extern "C" int MyAppMain(LFApp*) {
   testing::InitGoogleTest(&app->argc, const_cast<char**>(app->argv));
   LFL::FLAGS_font = LFL::FakeFontEngine::Filename();
   CHECK_EQ(0, LFL::app->Create(__FILE__));
