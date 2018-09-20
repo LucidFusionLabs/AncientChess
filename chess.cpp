@@ -74,7 +74,7 @@ struct ChessView : public View {
   bool title_changed = 0, console_animating = 0;
   Time move_animation_time = Time(200);
   DragTracker drag_tracker;
-  ChessView(Window *W) : View(W), divider(this, true, W->gl_w) { (top_game = &game_map[0])->active = 0; }
+  ChessView(Window *W) : View(W, "ChessView"), divider(this, true, W->gl_w) { (top_game = &game_map[0])->active = 0; }
 
   /**/  Chess::Game *Top()       { return top_game; }
   const Chess::Game *Top() const { return top_game; }
@@ -264,10 +264,10 @@ struct ChessView : public View {
   }
 
   void Reshaped() { divider.size = root->gl_w; }
-  void Layout() {
+  View *Layout(Flow *flow_in=nullptr) override {
     Font *font = chess_terminal->terminal->style.font;
     ResetView();
-    win = root->Box();
+    win = root->ViewBox();
     term.w = win.w;
     term_dim.x = win.w / font->FixedWidth();
     int min_term_h = font->Height() * 3;
@@ -283,12 +283,14 @@ struct ChessView : public View {
 
     Texture *board_tex = &app->asset("board1")->tex;
     child_box.PushBack(win, Drawable::Attr(board_tex), board_tex);
+    return this;
   }
 
   int Frame(LFL::Window *W, unsigned clicks, int flag) {
     Chess::Game *game = Top();
-    Time now = Now();
     GraphicsContext gc(W->gd);
+    point p = W->Box().TopLeft();
+    Time now = Now();
 
     if (game && (title_changed || game->active)) {
       if (game && game->active) {
@@ -309,40 +311,40 @@ struct ChessView : public View {
     }
 
     if (divider.changed) Layout();
-    if (win.w != W->gl_w) { ScopedFillColor sfc(W->gd, Color::grey70); gc.DrawBox1(Box(W->gl_x, win.y, W->gl_w, win.h)); }
-    Draw();
-    DrawGame(W, game ? game : Singleton<Chess::Game>::Set(), now);
+    if (win.w != W->gl_w) { ScopedFillColor sfc(W->gd, Color::grey70); gc.DrawBox1(Box(W->gl_x, win.y, W->gl_w, win.h)+p); }
+    Draw(p);
+    DrawGame(W, p, game ? game : Singleton<Chess::Game>::Set(), now);
 
     W->gd->DisableBlend();
     {
-      Scissor s(W->gd, term);
-      chess_terminal->terminal->Draw(term);
-      if (chess_terminal->terminal->scrolled_lines) chess_terminal->DrawScrollBar(term);
+      Scissor s(W->gd, term+p);
+      chess_terminal->terminal->Draw(term+p);
+      if (chess_terminal->terminal->scrolled_lines) chess_terminal->DrawScrollBar(term+p);
     }
-    if (divider.changing) BoxOutline().Draw(&gc, Box::DelBorder(term, Border(1,1,1,1)));
+    if (divider.changing) BoxOutline().Draw(&gc, Box::DelBorder(term, Border(1,1,1,1))+p);
 
     W->DrawDialogs();
     return 0;
   }
 
-  void DrawGame(Window *W, Chess::Game *game, Time now) {
+  void DrawGame(Window *W, const point &p, Chess::Game *game, Time now) {
     int black_font_index[7] = { 0, 3, 2, 0, 5, 4, 1 }, bits[65];
     static Font *pieces = app->fonts->Get(W->gl_h, "ChessPieces1");
     Drawable::Attr draw_attr(pieces);
     GraphicsContext gc(W->gd);
     for (int i=Chess::PAWN; i <= Chess::KING; i++) {
-      Bit::Indices(game->position.white[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(W->gd, black_font_index[i]+6, SquareCoords(*b, game->flip_board));
-      Bit::Indices(game->position.black[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(W->gd, black_font_index[i],   SquareCoords(*b, game->flip_board));
+      Bit::Indices(game->position.white[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(W->gd, black_font_index[i]+6, SquareCoords(*b, game->flip_board)+p);
+      Bit::Indices(game->position.black[i], bits); for (int *b = bits; *b != -1; b++) pieces->DrawGlyph(W->gd, black_font_index[i],   SquareCoords(*b, game->flip_board)+p);
     }
 
     if (game->position.move_number) {
-      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveFromSquare(game->position.move), game->flip_board));
-      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveToSquare  (game->position.move), game->flip_board));
+      W->gd->SetColor(Color(85, 85,  255)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveFromSquare(game->position.move), game->flip_board)+p);
+      W->gd->SetColor(Color(85, 255, 255)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveToSquare  (game->position.move), game->flip_board)+p);
     }
 
     for (auto &pm : game->premove) {
-      W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveFromSquare(pm.move), game->flip_board));
-      W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveToSquare  (pm.move), game->flip_board));
+      W->gd->SetColor(Color(255, 85,  85)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveFromSquare(pm.move), game->flip_board)+p);
+      W->gd->SetColor(Color(255, 255, 85)); BoxOutline().Draw(&gc, SquareCoords(Chess::GetMoveToSquare  (pm.move), game->flip_board)+p);
     }
 
     if (auto piece_type = Chess::GetPieceType(game->moving_piece)) {
@@ -351,12 +353,12 @@ struct ChessView : public View {
       Chess::BitBoard moves = game->position.PieceMoves(piece_type, start_square, piece_color, game->position.AllAttacks(!piece_color));
       Bit::Indices(moves, bits);
       W->gd->SetColor(Color(255, 85, 255));
-      for (int *b = bits; *b != -1; b++)   BoxOutline().Draw(&gc, SquareCoords(*b, game->flip_board));
-      W->gd->SetColor(Color(170, 0, 170)); BoxOutline().Draw(&gc, SquareCoords(start_square, game->flip_board));
+      for (int *b = bits; *b != -1; b++)   BoxOutline().Draw(&gc, SquareCoords(*b, game->flip_board)+p);
+      W->gd->SetColor(Color(170, 0, 170)); BoxOutline().Draw(&gc, SquareCoords(start_square, game->flip_board)+p);
       W->gd->SetColor(Color::white);
 
       int glyph_index = black_font_index[piece_type] + 6*(!piece_color);
-      pieces->DrawGlyph(W->gd, glyph_index, SquareCoords(start_square, game->flip_board) + (drag_tracker.end_click - drag_tracker.beg_click));
+      pieces->DrawGlyph(W->gd, glyph_index, SquareCoords(start_square, game->flip_board) + (drag_tracker.end_click - drag_tracker.beg_click) + p);
     } else W->gd->SetColor(Color::white);
 
     if (game->move_animate_from != -1) {
@@ -367,8 +369,8 @@ struct ChessView : public View {
       } 
       int glyph_index = black_font_index[Chess::GetPieceType(game->animating_piece)] +
         6*(!Chess::GetPieceColor(game->animating_piece));
-      Box start_square = SquareCoords(game->move_animate_from, game->flip_board);
-      Box end_square   = SquareCoords(game->move_animate_to,   game->flip_board);
+      Box start_square = SquareCoords(game->move_animate_from, game->flip_board) + p;
+      Box end_square   = SquareCoords(game->move_animate_to,   game->flip_board) + p;
       float percent = min(1.0f, float((now - game->move_animation_start).count()) / move_animation_time.count());
       point slope(end_square.centerX() - start_square.centerX(), end_square.centerY() - start_square.centerY());
       point pos = start_square.center() + slope * percent;
